@@ -280,7 +280,6 @@ async def handle_translate(
                     t = chunk.choices[0].delta.content
                     if not t:
                         continue
-                    piece_acc += t
                     state["tgt"] += t
                     await broadcast(room_id, json.dumps({
                         "type": "t_chunk",
