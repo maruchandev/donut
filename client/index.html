@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google" content="notranslate">
-<meta name="description" content="どーなつ — 日韓リアルタイム通訳サービス。話すだけで翻訳が届く、カジュアルな会話ルーム。">
+<meta name="description" content="どーなつ — 日韓の会話を、まるくつなぐ。話すだけで翻訳が届くカジュアル通訳。">
 <meta name="theme-color" content="#12100e">
 <meta property="og:title" content="どーなつ | 日韓リアルタイム通訳">
 <meta property="og:description" content="話すだけで翻訳が届く。6桁のルーム番号で、日本語と韓国語の会話をまるくつなぐ。">
@@ -679,7 +679,7 @@
 
   .hero {
     text-align: center;
-    padding: 28px 0 40px;
+    padding: 20px 0 28px;
   }
   .hero-visual {
     display: flex;
@@ -706,19 +706,12 @@
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
-  .hero-tagline {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--text);
-    margin-bottom: 14px;
-    line-height: 1.5;
-  }
   .hero-desc {
     font-size: 14px;
     color: var(--text-muted);
-    line-height: 1.75;
-    max-width: 480px;
-    margin: 0 auto 24px;
+    line-height: 1.7;
+    max-width: 400px;
+    margin: 0 auto 20px;
   }
   .hero-cta {
     display: inline-flex;
@@ -739,114 +732,8 @@
     box-shadow: 0 12px 28px #e8913a55;
   }
 
-  .section {
-    margin-bottom: 40px;
-  }
-  .section-title {
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 16px;
-    text-align: center;
-  }
-  .section-heading {
-    font-size: 20px;
-    font-weight: 800;
-    text-align: center;
-    margin-bottom: 8px;
-    letter-spacing: -0.02em;
-  }
-  .section-lead {
-    font-size: 13px;
-    color: var(--text-muted);
-    text-align: center;
-    line-height: 1.65;
-    margin-bottom: 22px;
-    padding: 0 8px;
-  }
-
-  .about-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 24px 22px;
-    line-height: 1.8;
-    font-size: 14px;
-    color: var(--text-muted);
-  }
-  .about-card strong { color: var(--text); font-weight: 700; }
-
-  .feature-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-  .feature-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 18px 16px;
-    text-align: left;
-  }
-  .feature-icon {
-    font-size: 22px;
-    margin-bottom: 10px;
-    line-height: 1;
-  }
-  .feature-card h3 {
-    font-size: 14px;
-    font-weight: 700;
-    margin-bottom: 6px;
-    color: var(--text);
-  }
-  .feature-card p {
-    font-size: 12px;
-    color: var(--text-muted);
-    line-height: 1.55;
-  }
-
-  .steps {
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    counter-reset: step;
-  }
-  .steps li {
-    counter-increment: step;
-    display: flex;
-    gap: 14px;
-    align-items: flex-start;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 16px 18px;
-  }
-  .steps li::before {
-    content: counter(step);
-    flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-size: 13px;
-    font-weight: 800;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .step-body h3 {
-    font-size: 14px;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-  .step-body p {
-    font-size: 12px;
-    color: var(--text-muted);
-    line-height: 1.55;
+  .start-section {
+    margin-bottom: 24px;
   }
 
   .cta-card {
@@ -1034,9 +921,8 @@
       padding: 10px 14px;
     }
     .entry { max-width: 100%; }
-    .landing { padding: 0 16px 40px; }
-    .feature-grid { grid-template-columns: 1fr; }
-    .hero { padding: 16px 0 32px; }
+    .landing { padding: 0 16px 32px; }
+    .hero { padding: 12px 0 20px; }
     .cta-card { padding: 28px 18px 24px; }
     .room-code { gap: 6px; }
     .room-digit { font-size: 20px; border-radius: 8px; max-width: 48px; }
@@ -1109,79 +995,11 @@
         <svg class="hero-donut" viewBox="0 0 88 88" aria-hidden="true"><circle cx="44" cy="44" r="40" fill="#e8913a"/><circle cx="44" cy="44" r="30" fill="#f4b87a"/><circle cx="44" cy="44" r="14" fill="#12100e"/><path d="M18 28c6-10 16-14 26-14s20 4 26 14" fill="none" stroke="#e8789a" stroke-width="5" stroke-linecap="round"/><circle cx="28" cy="24" r="3" fill="#fff" opacity=".5"/><circle cx="58" cy="26" r="2.5" fill="#fff" opacity=".35"/></svg>
       </div>
       <h1 id="heroTitle">どーなつ</h1>
-      <p class="hero-tagline" id="heroTagline">日韓の会話を、まるくつなぐ。</p>
-      <p class="hero-desc" id="heroDesc">話すだけで翻訳が届く、カジュアルなリアルタイム通訳サービス。6桁のルーム番号を共有するだけで、日本語と韓国語のおしゃべりがはじまります。</p>
+      <p class="hero-desc" id="heroDesc">日韓の会話を、まるくつなぐ。話すだけで翻訳が届くカジュアル通訳。ルーム番号を共有して、すぐにはじめられます。</p>
       <button type="button" class="hero-cta" id="heroCtaBtn">ルームに入る</button>
     </section>
 
-    <section class="section">
-      <p class="section-title" id="aboutLabel">About</p>
-      <h2 class="section-heading" id="aboutHeading">どーなつとは？</h2>
-      <div class="about-card" id="aboutText"><strong>どーなつ</strong>は、日本と韓国の言葉の壁をやわらかく越えるための通訳サービスです。旅行の同行者、オンラインの友達、言語交換——スマホひとつで、話した内容がその場で相手の言語に変わります。インストール不要、ブラウザだけで使えます。</div>
-    </section>
-
-    <section class="section">
-      <p class="section-title" id="featuresLabel">Features</p>
-      <h2 class="section-heading" id="featuresHeading">できること</h2>
-      <p class="section-lead" id="featuresLead">カジュアルな会話に必要な機能を、シンプルにまとめました。</p>
-      <div class="feature-grid">
-        <div class="feature-card">
-          <div class="feature-icon">🎙️</div>
-          <h3 id="feat1Title">話すだけ通訳</h3>
-          <p id="feat1Desc">録音ボタンを押して話すと、リアルタイムで翻訳が表示されます。</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">💬</div>
-          <h3 id="feat2Title">テキストもOK</h3>
-          <p id="feat2Desc">音声だけでなく、テキスト入力にも対応しています。</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔗</div>
-          <h3 id="feat3Title">ルーム共有</h3>
-          <p id="feat3Desc">6桁の番号・URL・QRコードで、すぐに仲間を招待できます。</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">📜</div>
-          <h3 id="feat4Title">会話を残す</h3>
-          <p id="feat4Desc">後から入った人も、これまでの会話を読み返せます。</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="section">
-      <p class="section-title" id="howLabel">How it works</p>
-      <h2 class="section-heading" id="howHeading">使い方</h2>
-      <ol class="steps">
-        <li>
-          <div class="step-body">
-            <h3 id="step1Title">ルームを作る</h3>
-            <p id="step1Desc">「新しいルームを作成」で6桁の番号が発行されます。</p>
-          </div>
-        </li>
-        <li>
-          <div class="step-body">
-            <h3 id="step2Title">番号を共有</h3>
-            <p id="step2Desc">QRコードやリンクで友達を招待しましょう。</p>
-          </div>
-        </li>
-        <li>
-          <div class="step-body">
-            <h3 id="step3Title">話す言語を選ぶ</h3>
-            <p id="step3Desc">日本語か韓国語を選ぶと、自動で相手の言語に翻訳されます。</p>
-          </div>
-        </li>
-        <li>
-          <div class="step-body">
-            <h3 id="step4Title">話して、読む</h3>
-            <p id="step4Desc">録音またはテキストで送信。翻訳がみんなの画面に届きます。</p>
-          </div>
-        </li>
-      </ol>
-    </section>
-
-    <section class="section" id="start">
-      <p class="section-title" id="startLabel">Start</p>
-      <h2 class="section-heading" id="startHeading">はじめる</h2>
+    <section class="start-section" id="start">
       <div class="cta-card">
         <p class="sub" id="lobbySub">ルーム番号を入力するか、新しいルームを作成してください</p>
         <div class="lobby-join">
@@ -1203,7 +1021,6 @@
 
     <footer class="landing-footer">
       <p><span class="brand-inline">どーなつ</span> — <span id="footerTagline">日韓リアルタイム通訳</span></p>
-      <p id="footerNote">ブラウザだけで使える、インストール不要の通訳サービス</p>
     </footer>
   </div>
 </div>
