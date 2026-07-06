@@ -1,0 +1,17 @@
+{
+  "name": "どーなつ — 日韓リアルタイム通訳",
+  "short_name": "どーなつ",
+  "description": "話すだけで翻訳が届く、日韓カジュアル通訳サービス",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#12100e",
+  "theme_color": "#e8913a",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

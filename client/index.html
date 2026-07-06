@@ -4,26 +4,36 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google" content="notranslate">
-<title>Stream Translator</title>
+<meta name="description" content="どーなつ — 日韓リアルタイム通訳サービス。話すだけで翻訳が届く、カジュアルな会話ルーム。">
+<meta name="theme-color" content="#12100e">
+<meta property="og:title" content="どーなつ | 日韓リアルタイム通訳">
+<meta property="og:description" content="話すだけで翻訳が届く。6桁のルーム番号で、日本語と韓国語の会話をまるくつなぐ。">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.json">
+<title>どーなつ — 日韓リアルタイム通訳</title>
 <style>
   :root {
-    --bg: #0a0e14;
-    --surface: #131920;
-    --surface-2: #1a222d;
-    --border: #2a3441;
-    --text: #e6edf3;
-    --text-muted: #8b9cb3;
-    --text-dim: #5c6b7f;
-    --accent: #3d8bfd;
-    --accent-hover: #58a6ff;
-    --record: #f85149;
-    --record-hover: #da3633;
-    --idle: #2ea043;
-    --idle-hover: #3fb950;
-    --mine-border: #3d8bfd44;
-    --other-border: #2a3441;
-    --error: #f85149;
-    --radius: 10px;
+    --bg: #12100e;
+    --surface: #1c1814;
+    --surface-2: #262018;
+    --border: #3d3428;
+    --text: #f5efe8;
+    --text-muted: #a89a8c;
+    --text-dim: #6e6258;
+    --accent: #e8913a;
+    --accent-hover: #f0a84d;
+    --accent-soft: #e8913a28;
+    --donut-pink: #e8789a;
+    --donut-glaze: #f4b87a;
+    --record: #e85d5d;
+    --record-hover: #d44a4a;
+    --idle: #5cad6a;
+    --idle-hover: #6fc47c;
+    --mine-border: #e8913a55;
+    --other-border: #3d3428;
+    --error: #e85d5d;
+    --radius: 12px;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -238,15 +248,6 @@
     background: var(--surface-2);
     border-color: var(--text-dim);
   }
-
-  .logo {
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    white-space: nowrap;
-  }
-
-  .logo span { color: var(--accent); }
 
   .bar {
     display: flex;
@@ -617,36 +618,280 @@
   #lobby {
     position: fixed;
     inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    overflow-y: auto;
     background: var(--bg);
     z-index: 100;
+    -webkit-overflow-scrolling: touch;
   }
   #lobby.hidden { display: none; }
 
-  .lobby-card {
+  .landing {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 20px 48px;
+  }
+
+  .landing-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0 8px;
+    position: sticky;
+    top: 0;
+    background: linear-gradient(180deg, var(--bg) 70%, transparent);
+    z-index: 2;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+  }
+  .brand-name { color: var(--accent); }
+
+  .btn-ghost {
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .btn-ghost:hover {
+    background: var(--surface-2);
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .hero {
+    text-align: center;
+    padding: 28px 0 40px;
+  }
+  .hero-visual {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+  .hero-donut {
+    width: 88px;
+    height: 88px;
+    filter: drop-shadow(0 12px 28px #e8913a33);
+    animation: float 4s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+  }
+  .hero h1 {
+    font-size: clamp(36px, 10vw, 48px);
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+    background: linear-gradient(135deg, var(--donut-glaze), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero-tagline {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 14px;
+    line-height: 1.5;
+  }
+  .hero-desc {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.75;
+    max-width: 480px;
+    margin: 0 auto 24px;
+  }
+  .hero-cta {
+    display: inline-flex;
+    padding: 13px 28px;
+    border-radius: 999px;
+    border: none;
+    background: linear-gradient(135deg, var(--accent), #d4782f);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    box-shadow: 0 8px 24px #e8913a44;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .hero-cta:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 28px #e8913a55;
+  }
+
+  .section {
+    margin-bottom: 40px;
+  }
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .section-heading {
+    font-size: 20px;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+  .section-lead {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.65;
+    margin-bottom: 22px;
+    padding: 0 8px;
+  }
+
+  .about-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px 22px;
+    line-height: 1.8;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+  .about-card strong { color: var(--text); font-weight: 700; }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .feature-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 40px 32px 32px;
-    width: min(400px, calc(100vw - 32px));
-    text-align: center;
+    padding: 18px 16px;
+    text-align: left;
   }
-  .lobby-card h1 {
+  .feature-icon {
     font-size: 22px;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
+    line-height: 1;
   }
-  .lobby-card h1 span { color: var(--accent); }
-  .lobby-card .sub {
+  .feature-card h3 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .feature-card p {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+
+  .steps {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    counter-reset: step;
+  }
+  .steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+  }
+  .steps li::before {
+    content: counter(step);
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .step-body h3 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .step-body p {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+
+  .cta-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 32px 24px 28px;
+    text-align: center;
+    box-shadow: 0 16px 40px #00000033;
+  }
+  .cta-card .sub {
     color: var(--text-muted);
     font-size: 13px;
-    margin-bottom: 28px;
+    margin-bottom: 24px;
     line-height: 1.55;
     padding: 0 4px;
   }
+
+  .landing-footer {
+    text-align: center;
+    padding: 32px 0 16px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .landing-footer .brand-inline {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  .chat-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .chat-logo-mark {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+  .chat-logo-name { color: var(--accent); }
   .lobby-join {
     display: flex;
     flex-direction: column;
@@ -680,7 +925,7 @@
   }
   .room-digit:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px #3d8bfd22;
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
   .room-digit.filled {
     border-color: var(--text-dim);
@@ -789,7 +1034,10 @@
       padding: 10px 14px;
     }
     .entry { max-width: 100%; }
-    .lobby-card { padding: 32px 20px 24px; }
+    .landing { padding: 0 16px 40px; }
+    .feature-grid { grid-template-columns: 1fr; }
+    .hero { padding: 16px 0 32px; }
+    .cta-card { padding: 28px 18px 24px; }
     .room-code { gap: 6px; }
     .room-digit { font-size: 20px; border-radius: 8px; max-width: 48px; }
     /* iOS: font-size < 16px on focus causes auto-zoom */
@@ -847,29 +1095,125 @@
 <body>
 
 <div id="lobby">
-  <div class="lobby-card">
-    <h1>Stream <span>Translator</span></h1>
-    <p class="sub" id="lobbySub">ルーム番号を入力するか、新しいルームを作成してください</p>
-    <div class="lobby-join">
-      <div class="room-code" id="roomCode">
-        <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="1">
-        <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="2">
-        <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="3">
-        <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="4">
-        <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="5">
-        <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="6">
+  <div class="landing">
+    <header class="landing-header">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#e8913a"/><circle cx="16" cy="16" r="11" fill="#f4b87a"/><circle cx="16" cy="16" r="5.5" fill="#12100e"/><path d="M8 11c2-3 5-4 8-4s6 1 8 4" fill="none" stroke="#e8789a" stroke-width="2.2" stroke-linecap="round"/></svg>
+        <span class="brand-name" id="brandName">どーなつ</span>
       </div>
-      <button id="joinBtn" type="button">入室</button>
-    </div>
-    <div class="lobby-divider">or</div>
-    <button class="btn-new-room" id="newRoomBtn">新しいルームを作成</button>
-    <p class="lobby-error" id="lobbyError"></p>
+      <button type="button" class="btn-ghost" id="scrollStartBtn">はじめる</button>
+    </header>
+
+    <section class="hero">
+      <div class="hero-visual">
+        <svg class="hero-donut" viewBox="0 0 88 88" aria-hidden="true"><circle cx="44" cy="44" r="40" fill="#e8913a"/><circle cx="44" cy="44" r="30" fill="#f4b87a"/><circle cx="44" cy="44" r="14" fill="#12100e"/><path d="M18 28c6-10 16-14 26-14s20 4 26 14" fill="none" stroke="#e8789a" stroke-width="5" stroke-linecap="round"/><circle cx="28" cy="24" r="3" fill="#fff" opacity=".5"/><circle cx="58" cy="26" r="2.5" fill="#fff" opacity=".35"/></svg>
+      </div>
+      <h1 id="heroTitle">どーなつ</h1>
+      <p class="hero-tagline" id="heroTagline">日韓の会話を、まるくつなぐ。</p>
+      <p class="hero-desc" id="heroDesc">話すだけで翻訳が届く、カジュアルなリアルタイム通訳サービス。6桁のルーム番号を共有するだけで、日本語と韓国語のおしゃべりがはじまります。</p>
+      <button type="button" class="hero-cta" id="heroCtaBtn">ルームに入る</button>
+    </section>
+
+    <section class="section">
+      <p class="section-title" id="aboutLabel">About</p>
+      <h2 class="section-heading" id="aboutHeading">どーなつとは？</h2>
+      <div class="about-card" id="aboutText"><strong>どーなつ</strong>は、日本と韓国の言葉の壁をやわらかく越えるための通訳サービスです。旅行の同行者、オンラインの友達、言語交換——スマホひとつで、話した内容がその場で相手の言語に変わります。インストール不要、ブラウザだけで使えます。</div>
+    </section>
+
+    <section class="section">
+      <p class="section-title" id="featuresLabel">Features</p>
+      <h2 class="section-heading" id="featuresHeading">できること</h2>
+      <p class="section-lead" id="featuresLead">カジュアルな会話に必要な機能を、シンプルにまとめました。</p>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🎙️</div>
+          <h3 id="feat1Title">話すだけ通訳</h3>
+          <p id="feat1Desc">録音ボタンを押して話すと、リアルタイムで翻訳が表示されます。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💬</div>
+          <h3 id="feat2Title">テキストもOK</h3>
+          <p id="feat2Desc">音声だけでなく、テキスト入力にも対応しています。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔗</div>
+          <h3 id="feat3Title">ルーム共有</h3>
+          <p id="feat3Desc">6桁の番号・URL・QRコードで、すぐに仲間を招待できます。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📜</div>
+          <h3 id="feat4Title">会話を残す</h3>
+          <p id="feat4Desc">後から入った人も、これまでの会話を読み返せます。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <p class="section-title" id="howLabel">How it works</p>
+      <h2 class="section-heading" id="howHeading">使い方</h2>
+      <ol class="steps">
+        <li>
+          <div class="step-body">
+            <h3 id="step1Title">ルームを作る</h3>
+            <p id="step1Desc">「新しいルームを作成」で6桁の番号が発行されます。</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-body">
+            <h3 id="step2Title">番号を共有</h3>
+            <p id="step2Desc">QRコードやリンクで友達を招待しましょう。</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-body">
+            <h3 id="step3Title">話す言語を選ぶ</h3>
+            <p id="step3Desc">日本語か韓国語を選ぶと、自動で相手の言語に翻訳されます。</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-body">
+            <h3 id="step4Title">話して、読む</h3>
+            <p id="step4Desc">録音またはテキストで送信。翻訳がみんなの画面に届きます。</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="section" id="start">
+      <p class="section-title" id="startLabel">Start</p>
+      <h2 class="section-heading" id="startHeading">はじめる</h2>
+      <div class="cta-card">
+        <p class="sub" id="lobbySub">ルーム番号を入力するか、新しいルームを作成してください</p>
+        <div class="lobby-join">
+          <div class="room-code" id="roomCode">
+            <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="1">
+            <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="2">
+            <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="3">
+            <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="4">
+            <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="5">
+            <input type="text" class="room-digit" inputmode="numeric" maxlength="1" pattern="[0-9]" autocomplete="one-time-code" aria-label="6">
+          </div>
+          <button id="joinBtn" type="button">入室</button>
+        </div>
+        <div class="lobby-divider">or</div>
+        <button class="btn-new-room" id="newRoomBtn">新しいルームを作成</button>
+        <p class="lobby-error" id="lobbyError"></p>
+      </div>
+    </section>
+
+    <footer class="landing-footer">
+      <p><span class="brand-inline">どーなつ</span> — <span id="footerTagline">日韓リアルタイム通訳</span></p>
+      <p id="footerNote">ブラウザだけで使える、インストール不要の通訳サービス</p>
+    </footer>
   </div>
 </div>
 
 <div id="chat">
 <header>
-  <div class="logo">Stream <span>Translator</span></div>
+  <div class="logo chat-logo">
+    <svg class="chat-logo-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#e8913a"/><circle cx="16" cy="16" r="11" fill="#f4b87a"/><circle cx="16" cy="16" r="5.5" fill="#12100e"/></svg>
+    <span class="chat-logo-name" id="chatLogoName">どーなつ</span>
+  </div>
   <button type="button" class="room-badge" id="roomBadge" title="">
     <span class="room-badge-label" id="roomBadgeLabel">ルーム:</span>
     <span class="room-badge-num" id="roomBadgeNum"></span>
@@ -905,7 +1249,7 @@
 <div class="log" id="log">
   <div class="history-top hidden" id="historyTop"></div>
   <div class="empty-state" id="emptyState">
-    <div class="icon">🎙️</div>
+    <div class="icon">🍩</div>
     <p id="emptyText"></p>
   </div>
 </div>

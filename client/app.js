@@ -30,6 +30,8 @@ let speechFlushTimer = null;
 
 const lobbyEl = document.getElementById('lobby');
 const chatEl = document.getElementById('chat');
+const scrollStartBtn = document.getElementById('scrollStartBtn');
+const heroCtaBtn = document.getElementById('heroCtaBtn');
 const roomCodeEl = document.getElementById('roomCode');
 const roomDigits = Array.from(document.querySelectorAll('.room-digit'));
 const joinBtn = document.getElementById('joinBtn');
@@ -109,8 +111,34 @@ var TXT = {
     qrTap: 'タップしてQRコードを表示',
     copyLink: 'リンクをコピー',
     share: '共有',
-    shareText: 'ルーム {room} に参加してください',
+    shareText: 'どーなつのルーム {room} に来てね',
     historyLoading: '過去の会話を読み込み中…',
+    serviceName: 'どーなつ',
+    scrollStart: 'はじめる',
+    heroTagline: '日韓の会話を、まるくつなぐ。',
+    heroDesc: '話すだけで翻訳が届く、カジュアルなリアルタイム通訳サービス。6桁のルーム番号を共有するだけで、日本語と韓国語のおしゃべりがはじまります。',
+    heroCta: 'ルームに入る',
+    aboutLabel: 'About',
+    aboutHeading: 'どーなつとは？',
+    aboutText: '<strong>どーなつ</strong>は、日本と韓国の言葉の壁をやわらかく越えるための通訳サービスです。旅行の同行者、オンラインの友達、言語交換——スマホひとつで、話した内容がその場で相手の言語に変わります。インストール不要、ブラウザだけで使えます。',
+    featuresLabel: 'Features',
+    featuresHeading: 'できること',
+    featuresLead: 'カジュアルな会話に必要な機能を、シンプルにまとめました。',
+    feat1Title: '話すだけ通訳', feat1Desc: '録音ボタンを押して話すと、リアルタイムで翻訳が表示されます。',
+    feat2Title: 'テキストもOK', feat2Desc: '音声だけでなく、テキスト入力にも対応しています。',
+    feat3Title: 'ルーム共有', feat3Desc: '6桁の番号・URL・QRコードで、すぐに仲間を招待できます。',
+    feat4Title: '会話を残す', feat4Desc: '後から入った人も、これまでの会話を読み返せます。',
+    howLabel: 'How it works',
+    howHeading: '使い方',
+    step1Title: 'ルームを作る', step1Desc: '「新しいルームを作成」で6桁の番号が発行されます。',
+    step2Title: '番号を共有', step2Desc: 'QRコードやリンクで友達を招待しましょう。',
+    step3Title: '話す言語を選ぶ', step3Desc: '日本語か韓国語を選ぶと、自動で相手の言語に翻訳されます。',
+    step4Title: '話して、読む', step4Desc: '録音またはテキストで送信。翻訳がみんなの画面に届きます。',
+    startLabel: 'Start',
+    startHeading: 'はじめる',
+    footerTagline: '日韓リアルタイム通訳',
+    footerNote: 'ブラウザだけで使える、インストール不要の通訳サービス',
+    pageTitle: 'どーなつ — 日韓リアルタイム通訳',
   },
   ko: {
     lang: '내 언어', nick: '닉네임', ph: '이름',
@@ -142,8 +170,34 @@ var TXT = {
     qrTap: '탭하여 QR 코드 표시',
     copyLink: '링크 복사',
     share: '공유',
-    shareText: '룸 {room}에 참여하세요',
+    shareText: 'どーなつ 룸 {room}에 와요',
     historyLoading: '이전 대화 불러오는 중…',
+    serviceName: 'どーなつ',
+    scrollStart: '시작하기',
+    heroTagline: '일본어와 한국어 대화를, 둥글게 이어요.',
+    heroDesc: '말하기만 하면 번역이 도착하는 캐주얼 실시간 통역 서비스. 6자리 룸 번호만 공유하면 일본어와 한국어 수다가 시작됩니다.',
+    heroCta: '룸 입장',
+    aboutLabel: 'About',
+    aboutHeading: 'どーなつ(도넛)이란?',
+    aboutText: '<strong>どーなつ</strong>는 일본과 한국의 언어 장벽을 부드럽게 넘기 위한 통역 서비스입니다. 여행 동행, 온라인 친구, 언어 교환——스마트폰 하나로 말한 내용이 바로 상대 언어로 바뀝니다. 설치 없이 브라우저만으로 사용할 수 있습니다.',
+    featuresLabel: 'Features',
+    featuresHeading: '할 수 있는 것',
+    featuresLead: '캐주얼한 대화에 필요한 기능을 심플하게 모았습니다.',
+    feat1Title: '말하면 바로 통역', feat1Desc: '녹음 버튼을 누르고 말하면 실시간으로 번역이 표시됩니다.',
+    feat2Title: '텍스트도 OK', feat2Desc: '음성뿐 아니라 텍스트 입력도 지원합니다.',
+    feat3Title: '룸 공유', feat3Desc: '6자리 번호·URL·QR 코드로 바로 초대할 수 있습니다.',
+    feat4Title: '대화 기록', feat4Desc: '나중에 들어온 사람도 지금까지의 대화를 볼 수 있습니다.',
+    howLabel: 'How it works',
+    howHeading: '사용 방법',
+    step1Title: '룸 만들기', step1Desc: '「새로운 룸 만들기」로 6자리 번호가 발급됩니다.',
+    step2Title: '번호 공유', step2Desc: 'QR 코드나 링크로 친구를 초대하세요.',
+    step3Title: '언어 선택', step3Desc: '일본어 또는 한국어를 선택하면 자동으로 상대 언어로 번역됩니다.',
+    step4Title: '말하고, 읽기', step4Desc: '녹음 또는 텍스트로 전송. 번역이 모두의 화면에 도착합니다.',
+    startLabel: 'Start',
+    startHeading: '시작하기',
+    footerTagline: '일한 실시간 통역',
+    footerNote: '브라우저만으로 사용하는 설치 불필요 통역 서비스',
+    pageTitle: 'どーなつ — 일한 실시간 통역',
   },
   en: {
     lang: 'My language', nick: 'Nickname', ph: 'name',
@@ -175,8 +229,34 @@ var TXT = {
     qrTap: 'Tap to show QR code',
     copyLink: 'Copy link',
     share: 'Share',
-    shareText: 'Join room {room}',
+    shareText: 'Join どーなつ room {room}',
     historyLoading: 'Loading earlier messages…',
+    serviceName: 'どーなつ',
+    scrollStart: 'Get started',
+    heroTagline: 'Connect Japan & Korea, one chat at a time.',
+    heroDesc: 'A casual real-time interpretation service — just speak and translations appear. Share a 6-digit room code to start chatting in Japanese and Korean.',
+    heroCta: 'Join a room',
+    aboutLabel: 'About',
+    aboutHeading: 'What is どーなつ?',
+    aboutText: '<strong>どーなつ</strong> (Donut) is a soft, friendly interpreter for Japanese ↔ Korean conversation. Travel companions, online friends, language exchange — your words become the other language instantly. No install, just your browser.',
+    featuresLabel: 'Features',
+    featuresHeading: 'What you can do',
+    featuresLead: 'Everything you need for casual bilingual chat, kept simple.',
+    feat1Title: 'Speak to translate', feat1Desc: 'Hit record and talk — translations stream in real time.',
+    feat2Title: 'Text works too', feat2Desc: 'Type a message when speaking isn\'t convenient.',
+    feat3Title: 'Share rooms', feat3Desc: 'Invite friends with a 6-digit code, link, or QR.',
+    feat4Title: 'Chat history', feat4Desc: 'Late joiners can scroll back through the conversation.',
+    howLabel: 'How it works',
+    howHeading: 'How to use',
+    step1Title: 'Create a room', step1Desc: 'Tap "Create New Room" to get a 6-digit code.',
+    step2Title: 'Share the code', step2Desc: 'Send a QR code or link to invite friends.',
+    step3Title: 'Pick your language', step3Desc: 'Choose Japanese or Korean — we translate to the other.',
+    step4Title: 'Talk & read', step4Desc: 'Record or type. Everyone sees the translation live.',
+    startLabel: 'Start',
+    startHeading: 'Get started',
+    footerTagline: 'JP↔KR real-time interpretation',
+    footerNote: 'Browser-based · No install required',
+    pageTitle: 'どーなつ — JP↔KR Interpretation',
   },
 };
 
@@ -217,9 +297,22 @@ function checkRoomExists(id) {
   });
 }
 
+function setText(id, text, html) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  if (html) el.innerHTML = text;
+  else el.textContent = text;
+}
+
+function scrollToStart() {
+  var el = document.getElementById('start');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function applyUI() {
   var t = TXT[UI];
   document.documentElement.lang = UI;
+  document.title = t.pageTitle;
   spkInput.placeholder = t.ph;
   textInput.placeholder = t.inputPh;
   inputHint.textContent = t.inputHint;
@@ -236,6 +329,41 @@ function applyUI() {
   qrHint.textContent = t.qrHint;
   qrShareBtn.textContent = t.share;
   qrCopyBtn.textContent = t.copyLink;
+  setText('brandName', t.serviceName);
+  setText('heroTitle', t.serviceName);
+  setText('chatLogoName', t.serviceName);
+  setText('scrollStartBtn', t.scrollStart);
+  setText('heroTagline', t.heroTagline);
+  setText('heroDesc', t.heroDesc);
+  setText('heroCtaBtn', t.heroCta);
+  setText('aboutLabel', t.aboutLabel);
+  setText('aboutHeading', t.aboutHeading);
+  setText('aboutText', t.aboutText, true);
+  setText('featuresLabel', t.featuresLabel);
+  setText('featuresHeading', t.featuresHeading);
+  setText('featuresLead', t.featuresLead);
+  setText('feat1Title', t.feat1Title);
+  setText('feat1Desc', t.feat1Desc);
+  setText('feat2Title', t.feat2Title);
+  setText('feat2Desc', t.feat2Desc);
+  setText('feat3Title', t.feat3Title);
+  setText('feat3Desc', t.feat3Desc);
+  setText('feat4Title', t.feat4Title);
+  setText('feat4Desc', t.feat4Desc);
+  setText('howLabel', t.howLabel);
+  setText('howHeading', t.howHeading);
+  setText('step1Title', t.step1Title);
+  setText('step1Desc', t.step1Desc);
+  setText('step2Title', t.step2Title);
+  setText('step2Desc', t.step2Desc);
+  setText('step3Title', t.step3Title);
+  setText('step3Desc', t.step3Desc);
+  setText('step4Title', t.step4Title);
+  setText('step4Desc', t.step4Desc);
+  setText('startLabel', t.startLabel);
+  setText('startHeading', t.startHeading);
+  setText('footerTagline', t.footerTagline);
+  setText('footerNote', t.footerNote);
   updateRoomBadge();
   updateShareButton();
 }
@@ -260,7 +388,7 @@ function shareRoom() {
   if (!roomId || !canNativeShare()) return;
   var text = TXT[UI].shareText.replace('{room}', roomId);
   navigator.share({
-    title: 'Stream Translator',
+    title: TXT[UI].serviceName,
     text: text,
     url: roomShareUrl(roomId),
   }).catch(function(err) {
@@ -511,10 +639,11 @@ function showLobby(errMsg) {
   roomId = '';
   updateRoomUrl('');
   lobbyEl.classList.remove('hidden');
+  lobbyEl.scrollTop = 0;
   chatEl.classList.remove('open');
   clearRoomCode();
   lobbyError.textContent = errMsg || '';
-  focusRoomDigit(0);
+  scrollToStart();
 }
 
 function connect() {
@@ -958,6 +1087,9 @@ newRoomBtn.addEventListener('click', function() {
 joinBtn.addEventListener('click', function() {
   joinRoom(getRoomCode());
 });
+
+if (scrollStartBtn) scrollStartBtn.addEventListener('click', scrollToStart);
+if (heroCtaBtn) heroCtaBtn.addEventListener('click', scrollToStart);
 
 dissolveBtn.addEventListener('click', function() {
   hideMenu();
