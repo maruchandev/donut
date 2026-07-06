@@ -43,6 +43,7 @@ const roomBadgeLabel = document.getElementById('roomBadgeLabel');
 const roomBadgeNum = document.getElementById('roomBadgeNum');
 const roomBadgeIcon = document.getElementById('roomBadgeIcon');
 const copyToast = document.getElementById('copyToast');
+const screenLink = document.getElementById('screenLink');
 const dissolveBtn = document.getElementById('dissolveBtn');
 const menuBtn = document.getElementById('menuBtn');
 const menuDrop = document.getElementById('menuDrop');
@@ -54,6 +55,7 @@ const qrCodeEl = document.getElementById('qrCode');
 const qrHint = document.getElementById('qrHint');
 const qrActions = document.getElementById('qrActions');
 const qrShareBtn = document.getElementById('qrShareBtn');
+const qrScreenLink = document.getElementById('qrScreenLink');
 const qrCopyBtn = document.getElementById('qrCopyBtn');
 
 const logEl = document.getElementById('log');
@@ -102,6 +104,7 @@ var TXT = {
     roomCreateFailed: 'ルームの作成に失敗しました',
     roomLabel: 'ルーム:',
     linkCopied: 'リンクをコピーしました',
+    screen: '大画面表示',
     dissolve: 'ルームを解散',
     dissolveConfirm: 'ルームを解散しますか？全員が退出し、ルームは削除されます。',
     roomDissolved: 'ルームが解散されました',
@@ -110,6 +113,7 @@ var TXT = {
     qrHint: 'QRコードを読み取って入室',
     qrTap: 'タップしてQRコードを表示',
     copyLink: 'リンクをコピー',
+    openScreen: '大画面表示を開く',
     share: '共有',
     shareText: 'どーなつのルーム {room} に来てね',
     historyLoading: '過去の会話を読み込み中…',
@@ -141,6 +145,7 @@ var TXT = {
     roomCreateFailed: '룸 생성에 실패했습니다',
     roomLabel: '룸:',
     linkCopied: '링크를 복사했습니다',
+    screen: '대형 화면',
     dissolve: '룸 해산',
     dissolveConfirm: '룸을 해산하시겠습니까? 모든 참가자가 퇴장하고 룸이 삭제됩니다.',
     roomDissolved: '룸이 해산되었습니다',
@@ -149,6 +154,7 @@ var TXT = {
     qrHint: 'QR 코드를 스캔하여 입장',
     qrTap: '탭하여 QR 코드 표시',
     copyLink: '링크 복사',
+    openScreen: '대형 화면 열기',
     share: '공유',
     shareText: 'どーなつ 룸 {room}에 와요',
     historyLoading: '이전 대화 불러오는 중…',
@@ -180,6 +186,7 @@ var TXT = {
     roomCreateFailed: 'Failed to create room',
     roomLabel: 'Room:',
     linkCopied: 'Link copied',
+    screen: 'Large screen',
     dissolve: 'End room',
     dissolveConfirm: 'End this room? Everyone will be removed and the room will be deleted.',
     roomDissolved: 'Room has been ended',
@@ -188,6 +195,7 @@ var TXT = {
     qrHint: 'Scan the QR code to join',
     qrTap: 'Tap to show QR code',
     copyLink: 'Copy link',
+    openScreen: 'Open large screen',
     share: 'Share',
     shareText: 'Join どーなつ room {room}',
     historyLoading: 'Loading earlier messages…',
@@ -237,6 +245,17 @@ function checkRoomExists(id) {
   });
 }
 
+function createRoomWithCode(code) {
+  return fetch('/room', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ room: code }),
+  }).then(function(r) {
+    if (!r.ok) throw new Error('create failed');
+    return r.json();
+  });
+}
+
 function setText(id, text, html) {
   var el = document.getElementById(id);
   if (!el) return;
@@ -262,6 +281,7 @@ function applyUI() {
   lobbySub.textContent = t.lobbySub;
   joinBtn.textContent = t.join;
   newRoomBtn.textContent = t.newRoom;
+  if (screenLink) screenLink.textContent = t.screen;
   dissolveBtn.textContent = t.dissolve;
   dissolveBtn.title = t.dissolveConfirm;
   roomBadgeIcon.textContent = 'QR';
@@ -269,6 +289,7 @@ function applyUI() {
   qrHint.textContent = t.qrHint;
   qrShareBtn.textContent = t.share;
   qrCopyBtn.textContent = t.copyLink;
+  if (qrScreenLink) qrScreenLink.textContent = t.openScreen;
   setText('brandName', t.serviceName);
   setText('heroTitle', t.serviceName);
   setText('chatLogoName', t.serviceName);
@@ -277,6 +298,7 @@ function applyUI() {
   setText('heroCtaBtn', t.heroCta);
   setText('footerTagline', t.footerTagline);
   updateRoomBadge();
+  updateScreenLink();
   updateShareButton();
 }
 
@@ -285,6 +307,31 @@ function updateRoomBadge() {
   roomBadgeLabel.textContent = TXT[UI].roomLabel;
   roomBadgeNum.textContent = roomId;
   roomBadge.title = TXT[UI].qrTap;
+}
+
+function activeRoomId() {
+  return roomId || parseRoomFromUrl();
+}
+
+function screenPageUrl() {
+  var url = new URL('screen.html', location.href);
+  var id = activeRoomId();
+  if (id) url.searchParams.set('room', id);
+  else url.searchParams.delete('room');
+  return url.href;
+}
+
+function updateScreenLink() {
+  var url = screenPageUrl();
+  if (screenLink) screenLink.setAttribute('href', url);
+  if (qrScreenLink) qrScreenLink.setAttribute('href', url);
+}
+
+function openScreenPage(e) {
+  if (e) e.preventDefault();
+  var url = screenPageUrl();
+  window.open(url, '_blank', 'noopener,noreferrer');
+  setTimeout(hideMenu, 0);
 }
 
 function hideMenu() {
@@ -533,6 +580,7 @@ function showChat(id, opts) {
   roomId = id;
   WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/' + roomId;
   updateRoomBadge();
+  updateScreenLink();
   updateRoomUrl(roomId);
   lobbyEl.classList.add('hidden');
   chatEl.classList.add('open');
@@ -549,6 +597,7 @@ function showLobby(errMsg) {
   if (ws) { intentionalClose = true; ws.close(); ws = null; }
   dissolveBtn.disabled = false;
   roomId = '';
+  updateScreenLink();
   updateRoomUrl('');
   lobbyEl.classList.remove('hidden');
   lobbyEl.scrollTop = 0;
@@ -966,11 +1015,8 @@ function joinRoom(val) {
   lobbyError.textContent = '';
   joinBtn.disabled = true;
   checkRoomExists(val).then(function(exists) {
-    if (!exists) {
-      lobbyError.textContent = TXT[UI].roomNotFound;
-      return;
-    }
-    showChat(val);
+    var p = exists ? Promise.resolve() : createRoomWithCode(val);
+    return p.then(function() { showChat(val); });
   }).catch(function() {
     lobbyError.textContent = TXT[UI].errPrefix + ': ' + TXT[UI].roomNotFound;
   }).finally(function() {
@@ -1013,11 +1059,22 @@ dissolveBtn.addEventListener('click', function() {
 
 menuBtn.addEventListener('click', function(e) {
   e.stopPropagation();
+  updateScreenLink();
   menuDrop.classList.toggle('hidden');
 });
 
+if (screenLink) {
+  screenLink.addEventListener('click', openScreenPage);
+}
+if (qrScreenLink) {
+  qrScreenLink.addEventListener('click', openScreenPage);
+}
+
 menuDrop.addEventListener('click', function(e) {
   e.stopPropagation();
+  if (e.target.closest('a')) {
+    setTimeout(hideMenu, 0);
+  }
 });
 
 document.addEventListener('click', hideMenu);

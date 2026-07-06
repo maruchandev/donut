@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
@@ -352,14 +354,28 @@ app.add_middleware(
 async def health():
     return {"status": "ok", "model": API_MODEL}
 
+@app.get("/screen")
+async def screen_page():
+    return RedirectResponse(url="/screen.html", status_code=302)
+
+class RoomCreateRequest(BaseModel):
+    room: str | None = None
+
 @app.post("/room")
-async def create_room():
-    code = gen_room_code()
+async def create_room(req: RoomCreateRequest = RoomCreateRequest()):
+    if req.room:
+        if not is_valid_room_id(req.room):
+            raise HTTPException(status_code=400, detail="Invalid room ID")
+        if req.room in rooms:
+            return {"room": req.room, "created": False}
+        code = req.room
+    else:
+        code = gen_room_code()
     rooms[code] = set()
     room_ctx[code] = []
     touch_room(code)
     logger.info("Room created: %s", code)
-    return {"room": code}
+    return {"room": code, "created": True}
 
 @app.get("/room/{room_id}")
 async def room_exists(room_id: str):
@@ -456,6 +472,13 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
             room_names.pop(ws, None)
         logger.info("WebSocket disconnected (rooms: %d)", len(rooms))
 
+class WebSocketSafeStaticFiles(StaticFiles):
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await send({"type": "websocket.close", "code": 1000})
+            return
+        await super().__call__(scope, receive, send)
+
 static_dir = HERE.parent / "client"
 if static_dir.exists():
-    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="client")
+    app.mount("/", WebSocketSafeStaticFiles(directory=str(static_dir), html=True), name="client")

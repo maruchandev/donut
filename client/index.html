@@ -123,6 +123,7 @@
   .menu-drop.hidden { display: none; }
 
   .menu-item {
+    display: block;
     width: 100%;
     padding: 10px 12px;
     border: none;
@@ -135,6 +136,8 @@
     cursor: pointer;
     font-family: inherit;
     transition: background 0.15s;
+    text-decoration: none;
+    box-sizing: border-box;
   }
   .menu-item:hover { background: var(--surface-2); }
   .menu-item.danger { color: var(--record); }
@@ -217,6 +220,7 @@
   }
   .btn-qr-share,
   .btn-qr-copy {
+    display: block;
     width: 100%;
     padding: 11px 16px;
     border-radius: 10px;
@@ -225,6 +229,9 @@
     cursor: pointer;
     font-family: inherit;
     transition: background 0.15s, border-color 0.15s;
+    text-align: center;
+    text-decoration: none;
+    box-sizing: border-box;
   }
   .btn-qr-share {
     border: none;
@@ -1044,6 +1051,7 @@
     <div class="menu-wrap">
       <button id="menuBtn" class="btn-menu" type="button" aria-label="Menu">⋯</button>
       <div id="menuDrop" class="menu-drop hidden">
+        <a id="screenLink" class="menu-item" href="screen.html" target="_blank" rel="noopener noreferrer">大画面表示</a>
         <button id="dissolveBtn" class="menu-item danger" type="button">ルームを解散</button>
       </div>
     </div>
@@ -1091,6 +1099,7 @@
     <p class="qr-hint" id="qrHint">QRコードを読み取って入室</p>
     <div class="qr-actions" id="qrActions">
       <button id="qrShareBtn" class="btn-qr-share hidden" type="button">共有</button>
+      <a id="qrScreenLink" class="btn-qr-copy" href="screen.html" target="_blank" rel="noopener noreferrer">大画面表示を開く</a>
       <button id="qrCopyBtn" class="btn-qr-copy" type="button">リンクをコピー</button>
     </div>
   </div>
