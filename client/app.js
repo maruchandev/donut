@@ -1,4 +1,5 @@
-const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+var roomId = '';
+var WS_URL = '';
 const MAX_ENTRIES = 200;
 const WAITING_CLS = 'sub waiting';
 
@@ -10,6 +11,15 @@ let clientId = '';
 let localInterim = null;
 let nickCustomized = false;
 let intentionalClose = false;
+
+const lobbyEl = document.getElementById('lobby');
+const chatEl = document.getElementById('chat');
+const roomInput = document.getElementById('roomInput');
+const joinBtn = document.getElementById('joinBtn');
+const newRoomBtn = document.getElementById('newRoomBtn');
+const lobbyError = document.getElementById('lobbyError');
+const lobbySub = document.getElementById('lobbySub');
+const roomBadge = document.getElementById('roomBadge');
 
 const logEl = document.getElementById('log');
 const emptyState = document.getElementById('emptyState');
@@ -47,6 +57,12 @@ var TXT = {
     errPrefix: 'エラー',
     noSpeech: '音声認識に対応していないブラウザです',
     dir: { ja: '→ 한국어', ko: '→ 日本語' },
+    lobbySub: 'ルーム番号を入力するか、新しいルームを作成してください',
+    join: '入室',
+    newRoom: '新しいルームを作成',
+    roomCopied: 'コピーしました',
+    invalidRoom: '6桁の数字を入力してください',
+    roomLabel: 'ルーム:',
   },
   ko: {
     lang: '내 언어', nick: '닉네임', ph: '이름',
@@ -60,6 +76,12 @@ var TXT = {
     errPrefix: '오류',
     noSpeech: '이 브라우저는 음성 인식을 지원하지 않습니다',
     dir: { ja: '→ 한국어', ko: '→ 日本語' },
+    lobbySub: '룸 번호를 입력하거나 새 룸을 만들어주세요',
+    join: '입장',
+    newRoom: '새로운 룸 만들기',
+    roomCopied: '복사했습니다',
+    invalidRoom: '6자리 숫자를 입력해주세요',
+    roomLabel: '룸:',
   },
   en: {
     lang: 'My language', nick: 'Nickname', ph: 'name',
@@ -73,6 +95,12 @@ var TXT = {
     errPrefix: 'Error',
     noSpeech: 'Speech recognition is not supported in this browser',
     dir: { ja: '→ Korean', ko: '→ Japanese' },
+    lobbySub: 'Enter a room number or create a new room',
+    join: 'Join',
+    newRoom: 'Create New Room',
+    roomCopied: 'Copied',
+    invalidRoom: 'Enter a 6-digit number',
+    roomLabel: 'Room:',
   },
 };
 
@@ -87,6 +115,10 @@ function applyUI() {
   emptyText.textContent = t.empty;
   sendBtn.textContent = t.send;
   recordBtn.textContent = t.rec;
+  lobbySub.textContent = t.lobbySub;
+  joinBtn.textContent = t.join;
+  newRoomBtn.textContent = t.newRoom;
+  roomInput.placeholder = '000000';
 }
 
 function speakerColor(name) {
@@ -116,7 +148,27 @@ function trimEntries() {
   }
 }
 
+function showChat(id) {
+  roomId = id;
+  WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/' + roomId;
+  roomBadge.textContent = TXT[UI].roomLabel + ' ' + roomId;
+  lobbyEl.classList.add('hidden');
+  chatEl.style.display = 'flex';
+  chatEl.style.flexDirection = 'column';
+  connect();
+}
+
+function showLobby() {
+  if (ws) { intentionalClose = true; ws.close(); ws = null; }
+  lobbyEl.classList.remove('hidden');
+  chatEl.style.display = 'none';
+  roomInput.value = '';
+  lobbyError.textContent = '';
+  roomInput.focus();
+}
+
 function connect() {
+  if (!roomId) return;
   intentionalClose = false;
   ws = new WebSocket(WS_URL);
   ws.onopen = function() {
@@ -382,7 +434,52 @@ function sendText() {
   textInput.focus();
 }
 
-/* ---- events ---- */
+/* ---- lobby events ---- */
+
+newRoomBtn.addEventListener('click', function() {
+  lobbyError.textContent = '';
+  newRoomBtn.disabled = true;
+  newRoomBtn.textContent = '...';
+  fetch('/room', { method: 'POST' }).then(function(r) {
+    return r.json();
+  }).then(function(data) {
+    showChat(data.room);
+  }).catch(function(err) {
+    lobbyError.textContent = TXT[UI].errPrefix + ': ' + err.message;
+  }).finally(function() {
+    newRoomBtn.disabled = false;
+    newRoomBtn.textContent = TXT[UI].newRoom;
+  });
+});
+
+joinBtn.addEventListener('click', function() {
+  var val = roomInput.value.trim();
+  if (!/^\d{6}$/.test(val)) {
+    lobbyError.textContent = TXT[UI].invalidRoom;
+    return;
+  }
+  lobbyError.textContent = '';
+  showChat(val);
+});
+
+roomInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); joinBtn.click(); }
+});
+
+roomInput.addEventListener('input', function() {
+  this.value = this.value.replace(/\D/g, '').slice(0, 6);
+  lobbyError.textContent = '';
+});
+
+roomBadge.addEventListener('click', function() {
+  navigator.clipboard.writeText(roomId).then(function() {
+    var orig = roomBadge.textContent;
+    roomBadge.textContent = TXT[UI].roomCopied;
+    setTimeout(function() { roomBadge.textContent = orig; }, 1500);
+  }).catch(function() {});
+});
+
+/* ---- chat events ---- */
 
 recordBtn.addEventListener('click', function() {
   if (isRecording) stopRecording();
@@ -422,4 +519,4 @@ myLang.value = UI === 'ko' ? 'ko' : 'ja';
 dirHint.textContent = TXT[UI].dir[myLang.value];
 setStatus(TXT[UI].ready);
 updateEmptyState();
-connect();
+roomInput.focus();

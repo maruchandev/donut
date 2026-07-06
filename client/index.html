@@ -348,19 +348,160 @@
     white-space: nowrap;
   }
 
+  .room-badge {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    background: var(--surface-2);
+    padding: 4px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+    margin-left: auto;
+  }
+  .room-badge:hover { background: var(--border); }
+
+  #lobby {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    z-index: 100;
+  }
+  #lobby.hidden { display: none; }
+
+  .lobby-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 48px 40px 40px;
+    width: 380px;
+    max-width: 90vw;
+    text-align: center;
+  }
+  .lobby-card h1 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    margin-bottom: 32px;
+  }
+  .lobby-card h1 span { color: var(--accent); }
+  .lobby-card .sub {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-bottom: 24px;
+    line-height: 1.5;
+  }
+  .lobby-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .lobby-row input {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.15s;
+    font-family: inherit;
+  }
+  .lobby-row input:focus { border-color: var(--accent); }
+  .lobby-row input::placeholder {
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--text-dim);
+  }
+  .lobby-row button {
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--accent);
+    color: #fff;
+    transition: background 0.15s;
+    white-space: nowrap;
+    font-family: inherit;
+  }
+  .lobby-row button:hover { background: var(--accent-hover); }
+  .lobby-divider {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin: 16px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .lobby-divider::before, .lobby-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .btn-new-room {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text);
+    transition: background 0.15s;
+    font-family: inherit;
+  }
+  .btn-new-room:hover { background: var(--surface-2); }
+  .lobby-error {
+    color: var(--record);
+    font-size: 12px;
+    margin-top: 12px;
+    min-height: 1.2em;
+  }
+
   @media (max-width: 600px) {
     header, .bar, .input-footer { padding-left: 14px; padding-right: 14px; }
     .log { padding: 12px 14px; }
     .bar-divider { display: none; }
     .status { width: 100%; margin-left: 0; order: 10; }
     .entry { max-width: 100%; }
+    .lobby-card { padding: 32px 24px 28px; }
   }
 </style>
 </head>
 <body>
 
+<div id="lobby">
+  <div class="lobby-card">
+    <h1>Stream <span>Translator</span></h1>
+    <p class="sub" id="lobbySub">ルーム番号を入力するか、新しいルームを作成してください</p>
+    <div class="lobby-row">
+      <input type="text" id="roomInput" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="000000">
+      <button id="joinBtn">入室</button>
+    </div>
+    <div class="lobby-divider">or</div>
+    <button class="btn-new-room" id="newRoomBtn">新しいルームを作成</button>
+    <p class="lobby-error" id="lobbyError"></p>
+  </div>
+</div>
+
+<div id="chat" style="display:none">
 <header>
   <div class="logo">Stream <span>Translator</span></div>
+  <span class="room-badge" id="roomBadge" title="クリックでコピー"></span>
   <span class="conn">
     <span class="dot off" id="connDot"></span>
     <span class="conn-label" id="connLabel">Disconnected</span>
@@ -399,6 +540,7 @@
     <button id="sendBtn" class="btn-send" disabled></button>
   </div>
   <span class="input-hint" id="inputHint"></span>
+</div>
 </div>
 
 <script src="app.js"></script>

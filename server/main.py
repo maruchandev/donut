@@ -1,9 +1,9 @@
 import json
 import os
+import random
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from asyncio import Queue
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -105,39 +105,49 @@ KR_NAMES = [
     "침팬지", "가젤", "하마", "표범", "망토개코원숭이", "호저", "스컹크", "족제비", "게", "가마우지",
 ]
 
-clients: dict[WebSocket, str] = {}
-ctx_buf: list[str] = []
+rooms: dict[str, set[WebSocket]] = {}
+room_clients: dict[WebSocket, str] = {}
+room_names: dict[WebSocket, str] = {}
+room_ctx: dict[str, list[str]] = {}
 MAX_CTX = 6
 
-def pick_name(ws: WebSocket, lang: str) -> str:
+def pick_name(ws: WebSocket, room_id: str, lang: str) -> str:
     pool = JP_NAMES if lang == "ja" else KR_NAMES
-    old = clients.get(ws)
-    used = {v for k, v in clients.items() if k is not ws}
+    old = room_names.get(ws)
+    room_sockets = rooms.get(room_id, set())
+    used = {room_names.get(s) for s in room_sockets if s is not ws}
     for name in pool:
         if name not in used:
-            clients[ws] = name
+            room_names[ws] = name
             return name
     if old and old not in used:
         return old
     name = f"User{len(used)}"
-    clients[ws] = name
+    room_names[ws] = name
     return name
 
-async def broadcast(data: str):
+async def broadcast(room_id: str, data: str):
     dead: list[WebSocket] = []
-    for c in clients:
+    room = rooms.get(room_id, set())
+    for c in room:
         try:
             await c.send_text(data)
         except Exception:
             dead.append(c)
     for c in dead:
-        clients.pop(c, None)
+        room.discard(c)
+        room_clients.pop(c, None)
+        room_names.pop(c, None)
 
 async def send_to(ws: WebSocket, data: str):
     try:
         await ws.send_text(data)
     except Exception:
-        clients.pop(ws, None)
+        rid = room_clients.get(ws)
+        if rid:
+            rooms.get(rid, set()).discard(ws)
+        room_clients.pop(ws, None)
+        room_names.pop(ws, None)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -158,9 +168,26 @@ app.add_middleware(
 async def health():
     return {"status": "ok", "model": API_MODEL}
 
-@app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket):
+@app.post("/room")
+async def create_room():
+    code = f"{random.randint(0, 999999):06d}"
+    while code in rooms:
+        code = f"{random.randint(0, 999999):06d}"
+    rooms[code] = set()
+    room_ctx[code] = []
+    logger.info("Room created: %s", code)
+    return {"room": code}
+
+@app.websocket("/ws/{room_id}")
+async def ws_endpoint(ws: WebSocket, room_id: str):
     await ws.accept()
+    if room_id not in rooms:
+        rooms[room_id] = set()
+    if room_id not in room_ctx:
+        room_ctx[room_id] = []
+    rooms[room_id].add(ws)
+    room_clients[ws] = room_id
+
     init_lang = "ja"
     try:
         init_raw = await ws.receive_text()
@@ -169,12 +196,12 @@ async def ws_endpoint(ws: WebSocket):
             init_lang = init_msg["lang"]
     except (json.JSONDecodeError, KeyError):
         logger.warning("Invalid init message, using default lang=ja")
-    assigned = pick_name(ws, init_lang)
+    assigned = pick_name(ws, room_id, init_lang)
     await ws.send_text(json.dumps({
         "type": "system",
         "speaker_id": assigned,
     }))
-    logger.info("WebSocket connected (%d total, name=%s)", len(clients), assigned)
+    logger.info("WebSocket connected room=%s (%d in room, name=%s)", room_id, len(rooms.get(room_id, set())), assigned)
     try:
         while True:
             raw = await ws.receive_text()
@@ -182,10 +209,9 @@ async def ws_endpoint(ws: WebSocket):
 
             if msg.get("type") == "init":
                 if msg.get("lang") in ("ja", "ko"):
-                    new_name = pick_name(ws, msg["lang"])
+                    new_name = pick_name(ws, room_id, msg["lang"])
                     await send_to(ws, json.dumps({
-                        "type": "system",
-                        "speaker_id": new_name,
+                        "type": "system", "speaker_id": new_name,
                     }))
                 continue
 
@@ -196,14 +222,12 @@ async def ws_endpoint(ws: WebSocket):
             target = msg["target_lang"]
             source = msg.get("source_lang", "?")
             uid = msg.get("uid", 0)
-            spk = msg.get("speaker_id") or clients.get(ws, "unknown")
+            spk = msg.get("speaker_id") or room_names.get(ws, "unknown")
             final = msg.get("is_final", True)
 
             if not text or not target:
                 await send_to(ws, json.dumps({
-                    "type": "error",
-                    "message": "text and target_lang are required",
-                    "uid": uid,
+                    "type": "error", "message": "text and target_lang are required", "uid": uid,
                 }))
                 continue
 
@@ -212,15 +236,16 @@ async def ws_endpoint(ws: WebSocket):
             if target == "auto":
                 target_lang_name = "Korean" if detected_src == "ja" else "Japanese"
                 prompt = AUTO_PROMPT
-                logger.info("translate | uid=%s spk=%s src=%s->tgt=%s text_len=%d",
-                            uid, spk, detected_src, "ko" if detected_src == "ja" else "ja", len(text))
+                logger.info("translate | room=%s uid=%s spk=%s src=%s->tgt=%s text_len=%d",
+                            room_id, uid, spk, detected_src, "ko" if detected_src == "ja" else "ja", len(text))
             else:
                 lang = LANG_MAP.get(target, target)
                 target_lang_name = lang
                 prompt = STREAM_PROMPT.format(lang=lang)
-                logger.info("translate | uid=%s spk=%s src=%s tgt=%s text_len=%d",
-                            uid, spk, detected_src, target, len(text))
+                logger.info("translate | room=%s uid=%s spk=%s src=%s tgt=%s text_len=%d",
+                            room_id, uid, spk, detected_src, target, len(text))
 
+            ctx_buf = room_ctx.get(room_id, [])
             ctx = ""
             if ctx_buf:
                 ctx = "Recent conversation:\n" + "\n".join(ctx_buf) + "\n\n"
@@ -229,8 +254,7 @@ async def ws_endpoint(ws: WebSocket):
                 stream = await client.chat.completions.create(
                     model=API_MODEL,
                     messages=[
-                        {"role": "system",
-                         "content": ctx + prompt},
+                        {"role": "system", "content": ctx + prompt},
                         {"role": "user", "content": text},
                     ],
                     stream=True,
@@ -240,9 +264,7 @@ async def ws_endpoint(ws: WebSocket):
             except Exception as e:
                 logger.error("API error: %s", e)
                 await send_to(ws, json.dumps({
-                    "type": "error",
-                    "message": str(e),
-                    "uid": uid,
+                    "type": "error", "message": str(e), "uid": uid,
                 }))
                 continue
 
@@ -252,42 +274,39 @@ async def ws_endpoint(ws: WebSocket):
                 if not t:
                     continue
                 acc += t
-                await broadcast(json.dumps({
-                    "type": "t_chunk",
-                    "text": t,
-                    "acc": acc,
-                    "uid": uid,
-                    "final": final,
-                    "spk": spk,
-                    "src": text,
-                    "src_lang": use_src,
-                    "tgt_lang": target,
+                await broadcast(room_id, json.dumps({
+                    "type": "t_chunk", "text": t, "acc": acc, "uid": uid,
+                    "final": final, "spk": spk, "src": text,
+                    "src_lang": use_src, "tgt_lang": target,
                 }, ensure_ascii=False))
 
-            await broadcast(json.dumps({
-                "type": "t_done",
-                "full": acc,
-                "uid": uid,
-                "final": final,
-                "spk": spk,
-                "src": text,
-                "src_lang": use_src,
-                "tgt_lang": target,
+            await broadcast(room_id, json.dumps({
+                "type": "t_done", "full": acc, "uid": uid,
+                "final": final, "spk": spk, "src": text,
+                "src_lang": use_src, "tgt_lang": target,
             }, ensure_ascii=False))
 
             ctx_buf.append(f"{spk}: {text}")
             if len(ctx_buf) > MAX_CTX:
                 ctx_buf.pop(0)
 
-            logger.info("translate done | uid=%s tokens=%d", uid, len(acc))
+            logger.info("translate done | room=%s uid=%s tokens=%d", room_id, uid, len(acc))
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.error("Unexpected error: %s", e)
     finally:
-        clients.pop(ws, None)
-        logger.info("WebSocket disconnected (%d remaining)", len(clients))
+        rid = room_clients.pop(ws, None)
+        if rid:
+            room = rooms.get(rid, set())
+            room.discard(ws)
+            room_names.pop(ws, None)
+            if not room:
+                del rooms[rid]
+                room_ctx.pop(rid, None)
+                logger.info("Room %s deleted (empty)", rid)
+        logger.info("WebSocket disconnected (rooms: %d)", len(rooms))
 
 static_dir = HERE.parent / "client"
 if static_dir.exists():
