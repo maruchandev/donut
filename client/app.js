@@ -43,6 +43,7 @@ const roomBadgeLabel = document.getElementById('roomBadgeLabel');
 const roomBadgeNum = document.getElementById('roomBadgeNum');
 const roomBadgeIcon = document.getElementById('roomBadgeIcon');
 const copyToast = document.getElementById('copyToast');
+const homeBtn = document.getElementById('homeBtn');
 const screenLink = document.getElementById('screenLink');
 const dissolveBtn = document.getElementById('dissolveBtn');
 const menuBtn = document.getElementById('menuBtn');
@@ -123,6 +124,7 @@ var TXT = {
     heroCta: 'ルームに入る',
     footerTagline: '日韓リアルタイム通訳',
     pageTitle: 'どーなつ — 日韓リアルタイム通訳',
+    backHome: 'トップへ戻る',
   },
   ko: {
     lang: '내 언어', nick: '닉네임', ph: '이름',
@@ -164,6 +166,7 @@ var TXT = {
     heroCta: '룸 입장',
     footerTagline: '일한 실시간 통역',
     pageTitle: 'どーなつ — 일한 실시간 통역',
+    backHome: '홈으로 돌아가기',
   },
   en: {
     lang: 'My language', nick: 'Nickname', ph: 'name',
@@ -205,6 +208,7 @@ var TXT = {
     heroCta: 'Join a room',
     footerTagline: 'JP↔KR real-time interpretation',
     pageTitle: 'どーなつ — JP↔KR Interpretation',
+    backHome: 'Back to home',
   },
 };
 
@@ -293,6 +297,7 @@ function applyUI() {
   setText('brandName', t.serviceName);
   setText('heroTitle', t.serviceName);
   setText('chatLogoName', t.serviceName);
+  if (homeBtn) homeBtn.title = t.backHome;
   setText('scrollStartBtn', t.scrollStart);
   setText('heroDesc', t.heroDesc);
   setText('heroCtaBtn', t.heroCta);
@@ -1045,6 +1050,13 @@ newRoomBtn.addEventListener('click', function() {
 joinBtn.addEventListener('click', function() {
   joinRoom(getRoomCode());
 });
+
+if (homeBtn) {
+  homeBtn.addEventListener('click', function() {
+    if (isRecording) stopRecording();
+    showLobby();
+  });
+}
 
 if (scrollStartBtn) scrollStartBtn.addEventListener('click', scrollToStart);
 if (heroCtaBtn) heroCtaBtn.addEventListener('click', scrollToStart);
