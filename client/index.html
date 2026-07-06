@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stream Translator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', 'Noto Sans JP', sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+  .bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 12px 16px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .bar select, .bar input {
+    background: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .bar select:focus, .bar input:focus {
+    border-color: #58a6ff;
+    outline: none;
+  }
+  .bar button {
+    padding: 6px 18px;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+    flex-shrink: 0;
+  }
+  .btn-record {
+    background: #da3633;
+    color: #fff;
+    border-color: #da3633;
+  }
+  .btn-record:hover { background: #b62324; }
+  .btn-record.idle {
+    background: #238636;
+    color: #fff;
+    border-color: #238636;
+  }
+  .btn-record.idle:hover { background: #2ea043; }
+  .btn-record:disabled { opacity: 0.4; cursor: default; }
+  .status { margin-left: auto; font-size: 12px; color: #8b949e; }
+  .conn { display: flex; align-items: center; gap: 6px; width: 110px; flex-shrink: 0; }
+  .input-row {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #161b22;
+    border-top: 1px solid #30363d;
+    flex-shrink: 0;
+  }
+  .input-row textarea {
+    flex: 1;
+    background: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    line-height: 1.4;
+    height: 36px;
+    overflow-y: auto;
+  }
+  .input-row textarea:focus { border-color: #58a6ff; }
+  .input-row textarea:disabled { opacity: 0.4; }
+  .input-row button {
+    padding: 8px 20px;
+    border-radius: 6px;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 600;
+    align-self: flex-end;
+  }
+  .btn-send {
+    background: #1f6feb;
+    color: #fff;
+  }
+  .btn-send:hover { background: #388bfd; }
+  .btn-send:disabled { opacity: 0.4; cursor: default; }
+  .log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .log::-webkit-scrollbar { width: 8px; }
+  .log::-webkit-scrollbar-track { background: #0d1117; }
+  .log::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+  .entry {
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: #161b22;
+    border: 1px solid #21262d;
+    animation: in 0.15s ease;
+  }
+  @keyframes in { from { opacity: 0; } to { opacity: 1; } }
+  .entry .spk {
+    font-weight: 600;
+    font-size: 11px;
+    color: #484f58;
+    margin-bottom: 4px;
+    font-family: inherit;
+  }
+  .entry .main {
+    color: #c9d1d9;
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  .entry .sub {
+    color: #8b949e;
+    font-size: 12px;
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+  .entry .main.tent { color: #8b949e; }
+  .entry .main.final { color: #e6edf3; }
+  .entry .sub.tent { color: #484f58; }
+  .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+  .dot.on { background: #3fb950; box-shadow: 0 0 6px #3fb95088; }
+  .dot.off { background: #f85149; box-shadow: 0 0 6px #f8514988; }
+  .bar .hint { font-size: 12px; color: #484f58; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="conn">
+    <span class="dot off" id="connDot"></span>
+    <span id="connLabel" style="font-size:12px;color:#8b949e;">Disconnected</span>
+  </span>
+  <select id="srcLang">
+    <option value="ja" selected>ja</option>
+    <option value="en">en</option>
+    <option value="ko">ko</option>
+  </select>
+  <span class="hint">&rarr;</span>
+  <select id="tgtLang">
+    <option value="ko" selected>ko</option>
+    <option value="en">en</option>
+    <option value="ja">ja</option>
+  </select>
+  <input type="text" id="spkInput" placeholder="name" value="Speaker" size="8">
+  <button id="recordBtn" class="btn-record idle" disabled>Record</button>
+  <span class="status" id="statusMsg">Ready</span>
+</div>
+
+<div class="log" id="log"></div>
+
+<div class="input-row">
+  <textarea id="textInput" rows="1" placeholder="Type or dictate on keyboard..." disabled></textarea>
+  <button id="sendBtn" class="btn-send" disabled>Send</button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
