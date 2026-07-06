@@ -21,12 +21,11 @@ let historyLoaded = false;
 let scrollTimer = null;
 
 const SPEECH_FLUSH_MS = 2500;
-const SPEECH_MIN_CHARS = 12;
+const SENTENCE_END_RE = /[。！？.!?\n]/;
 
 let speechCommitted = '';
 let speechInterim = '';
 let speechSentLen = 0;
-let speechUid = null;
 let speechFlushTimer = null;
 
 const lobbyEl = document.getElementById('lobby');
@@ -709,31 +708,40 @@ function getSpeechFull() {
   return speechCommitted + speechInterim;
 }
 
+function getSpeechRemainder() {
+  return getSpeechFull().slice(speechSentLen);
+}
+
 function resetSpeechState() {
   speechCommitted = '';
   speechInterim = '';
   speechSentLen = 0;
-  speechUid = null;
   if (speechFlushTimer) {
     clearInterval(speechFlushTimer);
     speechFlushTimer = null;
   }
 }
 
-function ensureSpeechUid() {
-  if (!speechUid) {
-    speechUid = clientId + '-' + (++uttId);
+function splitAtSentenceEnds(text) {
+  var complete = [];
+  var lastEnd = 0;
+  for (var i = 0; i < text.length; i++) {
+    if (SENTENCE_END_RE.test(text[i])) {
+      var sent = text.slice(lastEnd, i + 1).trim();
+      if (sent) complete.push(sent);
+      lastEnd = i + 1;
+    }
   }
-  return speechUid;
+  return {
+    complete: complete,
+    remainder: text.slice(lastEnd),
+    consumed: lastEnd,
+  };
 }
 
-function updateSpeechPreview(full) {
-  if (speechUid && entries[speechUid]) {
-    entries[speechUid].main.textContent = full;
-    logEl.scrollTop = logEl.scrollHeight;
-    return;
-  }
-  if (!full) {
+function updateSpeechPreview() {
+  var remainder = getSpeechRemainder();
+  if (!remainder.trim()) {
     clearLocalInterim();
     return;
   }
@@ -748,7 +756,7 @@ function updateSpeechPreview(full) {
     logEl.appendChild(localInterim);
     updateEmptyState();
   }
-  localInterim.querySelector('.main').textContent = full;
+  localInterim.querySelector('.main').textContent = remainder;
   logEl.scrollTop = logEl.scrollHeight;
 }
 
@@ -759,28 +767,38 @@ function clearLocalInterim() {
   }
 }
 
-function flushSpeech(isFinal) {
-  var full = getSpeechFull();
-  var delta = full.slice(speechSentLen);
-  if (!delta) return;
-  if (!isFinal && delta.length < SPEECH_MIN_CHARS) return;
-
-  var uid = ensureSpeechUid();
-  var isContinuation = !!entries[uid];
+function sendSpeechSentence(text) {
+  if (!text) return;
   clearLocalInterim();
+  send(text, true, { fullSrc: text });
+}
 
-  send(delta, isFinal, {
-    uid: uid,
-    continuation: isContinuation,
-    fullSrc: full,
-  });
+function flushSpeech(forceFinal) {
+  var unsent = getSpeechRemainder();
+  if (!unsent) {
+    if (forceFinal) {
+      speechCommitted = '';
+      speechSentLen = 0;
+    }
+    return;
+  }
 
-  speechSentLen = full.length;
+  var split = splitAtSentenceEnds(unsent);
+  for (var i = 0; i < split.complete.length; i++) {
+    sendSpeechSentence(split.complete[i]);
+  }
 
-  if (isFinal) {
-    speechUid = null;
-    speechSentLen = 0;
+  if (split.consumed > 0) {
+    speechSentLen += split.consumed;
+    updateSpeechPreview();
+  }
+
+  if (forceFinal) {
+    var tail = split.remainder.trim();
+    if (tail) sendSpeechSentence(tail);
     speechCommitted = '';
+    speechSentLen = 0;
+    clearLocalInterim();
   }
 }
 
@@ -810,7 +828,8 @@ function startRecording() {
       }
     }
     speechInterim = interim;
-    updateSpeechPreview(getSpeechFull());
+    updateSpeechPreview();
+    flushSpeech(false);
 
     if (hadFinal) {
       flushSpeech(true);
