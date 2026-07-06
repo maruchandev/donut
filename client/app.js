@@ -116,15 +116,6 @@ function trimEntries() {
   }
 }
 
-var micStream = null;
-
-function requestMic() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-  navigator.mediaDevices.getUserMedia({audio: true}).then(function(s) {
-    micStream = s;
-  }).catch(function() {});
-}
-
 function connect() {
   intentionalClose = false;
   ws = new WebSocket(WS_URL);
@@ -431,5 +422,4 @@ myLang.value = UI === 'ko' ? 'ko' : 'ja';
 dirHint.textContent = TXT[UI].dir[myLang.value];
 setStatus(TXT[UI].ready);
 updateEmptyState();
-requestMic();
 connect();
