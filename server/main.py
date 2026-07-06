@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 
 import db
+from chunking import split_text
 
 load_dotenv()
 
@@ -24,7 +25,7 @@ API_KEY = os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.deepseek.com/v1")
 API_MODEL = os.getenv("API_MODEL", "deepseek-chat")
 API_TEMPERATURE = float(os.getenv("API_TEMPERATURE", "0.1"))
-API_MAX_TOKENS = int(os.getenv("API_MAX_TOKENS", "256"))
+API_MAX_TOKENS = int(os.getenv("API_MAX_TOKENS", "512"))
 ORIGINS = os.getenv("ORIGINS", "*")
 ROOM_IDLE_SECS = int(os.getenv("ROOM_IDLE_SECS", "3600"))
 ROOM_CLEANUP_INTERVAL = int(os.getenv("ROOM_CLEANUP_INTERVAL", "60"))
@@ -119,6 +120,8 @@ room_clients: dict[WebSocket, str] = {}
 room_names: dict[WebSocket, str] = {}
 room_ctx: dict[str, list[str]] = {}
 room_last_active: dict[str, float] = {}
+utterance_state: dict[str, dict] = {}
+utterance_locks: dict[str, asyncio.Lock] = {}
 MAX_CTX = 6
 
 def touch_room(room_id: str) -> None:
@@ -147,6 +150,10 @@ async def dissolve_room(room_id: str, reason: str) -> None:
         except Exception:
             pass
     await db.delete_room_messages(room_id)
+    prefix = f"{room_id}:"
+    for key in [k for k in utterance_state if k.startswith(prefix)]:
+        utterance_state.pop(key, None)
+        utterance_locks.pop(key, None)
     logger.info("Room %s closed (%s)", room_id, reason)
 
 async def cleanup_idle_rooms() -> None:
@@ -208,6 +215,117 @@ async def send_to(ws: WebSocket, data: str):
             rooms.get(rid, set()).discard(ws)
         room_clients.pop(ws, None)
         room_names.pop(ws, None)
+
+def utterance_key(room_id: str, uid: str) -> str:
+    return f"{room_id}:{uid}"
+
+async def handle_translate(
+    ws: WebSocket,
+    room_id: str,
+    text: str,
+    target: str,
+    source: str,
+    uid: str,
+    spk: str,
+    final: bool,
+) -> None:
+    detected_src = detect_lang(text)
+    use_src = detected_src if source in ("auto", "?") else source
+    if target == "auto":
+        prompt = AUTO_PROMPT
+        logger.info(
+            "translate | room=%s uid=%s spk=%s src=%s->tgt=%s delta_len=%d final=%s",
+            room_id, uid, spk, detected_src,
+            "ko" if detected_src == "ja" else "ja", len(text), final,
+        )
+    else:
+        lang = LANG_MAP.get(target, target)
+        prompt = STREAM_PROMPT.format(lang=lang)
+        logger.info(
+            "translate | room=%s uid=%s spk=%s src=%s tgt=%s delta_len=%d final=%s",
+            room_id, uid, spk, detected_src, target, len(text), final,
+        )
+
+    ctx_buf = room_ctx.get(room_id, [])
+    ctx = ""
+    if ctx_buf:
+        ctx = "Recent conversation:\n" + "\n".join(ctx_buf) + "\n\n"
+
+    key = utterance_key(room_id, uid)
+    lock = utterance_locks.setdefault(key, asyncio.Lock())
+
+    async with lock:
+        state = utterance_state.setdefault(
+            key,
+            {"src": "", "tgt": "", "src_lang": use_src, "tgt_lang": target},
+        )
+        state["src"] += text
+        state["src_lang"] = use_src
+        state["tgt_lang"] = target
+        full_src = state["src"]
+
+        try:
+            for piece in split_text(text):
+                stream = await client.chat.completions.create(
+                    model=API_MODEL,
+                    messages=[
+                        {"role": "system", "content": ctx + prompt},
+                        {"role": "user", "content": piece},
+                    ],
+                    stream=True,
+                    temperature=API_TEMPERATURE,
+                    max_tokens=API_MAX_TOKENS,
+                )
+                async for chunk in stream:
+                    t = chunk.choices[0].delta.content
+                    if not t:
+                        continue
+                    piece_acc += t
+                    state["tgt"] += t
+                    await broadcast(room_id, json.dumps({
+                        "type": "t_chunk",
+                        "text": t,
+                        "acc": state["tgt"],
+                        "uid": uid,
+                        "final": final,
+                        "spk": spk,
+                        "src": full_src,
+                        "src_lang": use_src,
+                        "tgt_lang": target,
+                    }, ensure_ascii=False))
+        except Exception as e:
+            logger.error("API error: %s", e)
+            await send_to(ws, json.dumps({
+                "type": "error", "message": str(e), "uid": uid,
+            }))
+            return
+
+        if final:
+            await broadcast(room_id, json.dumps({
+                "type": "t_done",
+                "full": state["tgt"],
+                "uid": uid,
+                "final": final,
+                "spk": spk,
+                "src": full_src,
+                "src_lang": use_src,
+                "tgt_lang": target,
+            }, ensure_ascii=False))
+
+            ctx_buf.append(f"{spk}: {full_src}")
+            if len(ctx_buf) > MAX_CTX:
+                ctx_buf.pop(0)
+
+            await db.insert_message(
+                room_id, uid, spk, full_src, state["tgt"],
+                use_src, target, final,
+            )
+            utterance_state.pop(key, None)
+            utterance_locks.pop(key, None)
+            logger.info(
+                "translate done | room=%s uid=%s src_len=%d tgt_len=%d",
+                room_id, uid, len(full_src), len(state["tgt"]),
+            )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -322,69 +440,9 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
                 }))
                 continue
 
-            detected_src = detect_lang(text)
-            use_src = detected_src if source in ("auto", "?") else source
-            if target == "auto":
-                target_lang_name = "Korean" if detected_src == "ja" else "Japanese"
-                prompt = AUTO_PROMPT
-                logger.info("translate | room=%s uid=%s spk=%s src=%s->tgt=%s text_len=%d",
-                            room_id, uid, spk, detected_src, "ko" if detected_src == "ja" else "ja", len(text))
-            else:
-                lang = LANG_MAP.get(target, target)
-                target_lang_name = lang
-                prompt = STREAM_PROMPT.format(lang=lang)
-                logger.info("translate | room=%s uid=%s spk=%s src=%s tgt=%s text_len=%d",
-                            room_id, uid, spk, detected_src, target, len(text))
-
-            ctx_buf = room_ctx.get(room_id, [])
-            ctx = ""
-            if ctx_buf:
-                ctx = "Recent conversation:\n" + "\n".join(ctx_buf) + "\n\n"
-
-            try:
-                stream = await client.chat.completions.create(
-                    model=API_MODEL,
-                    messages=[
-                        {"role": "system", "content": ctx + prompt},
-                        {"role": "user", "content": text},
-                    ],
-                    stream=True,
-                    temperature=API_TEMPERATURE,
-                    max_tokens=API_MAX_TOKENS,
-                )
-            except Exception as e:
-                logger.error("API error: %s", e)
-                await send_to(ws, json.dumps({
-                    "type": "error", "message": str(e), "uid": uid,
-                }))
-                continue
-
-            acc = ""
-            async for chunk in stream:
-                t = chunk.choices[0].delta.content
-                if not t:
-                    continue
-                acc += t
-                await broadcast(room_id, json.dumps({
-                    "type": "t_chunk", "text": t, "acc": acc, "uid": uid,
-                    "final": final, "spk": spk, "src": text,
-                    "src_lang": use_src, "tgt_lang": target,
-                }, ensure_ascii=False))
-
-            await broadcast(room_id, json.dumps({
-                "type": "t_done", "full": acc, "uid": uid,
-                "final": final, "spk": spk, "src": text,
-                "src_lang": use_src, "tgt_lang": target,
-            }, ensure_ascii=False))
-
-            ctx_buf.append(f"{spk}: {text}")
-            if len(ctx_buf) > MAX_CTX:
-                ctx_buf.pop(0)
-
-            await db.insert_message(
-                room_id, uid, spk, text, acc, use_src, target, final,
+            await handle_translate(
+                ws, room_id, text, target, source, uid, spk, final,
             )
-            logger.info("translate done | room=%s uid=%s tokens=%d", room_id, uid, len(acc))
 
     except WebSocketDisconnect:
         pass

@@ -20,6 +20,15 @@ let historyExhausted = false;
 let historyLoaded = false;
 let scrollTimer = null;
 
+const SPEECH_FLUSH_MS = 2500;
+const SPEECH_MIN_CHARS = 12;
+
+let speechCommitted = '';
+let speechInterim = '';
+let speechSentLen = 0;
+let speechUid = null;
+let speechFlushTimer = null;
+
 const lobbyEl = document.getElementById('lobby');
 const chatEl = document.getElementById('chat');
 const roomCodeEl = document.getElementById('roomCode');
@@ -696,6 +705,53 @@ function resizeTextarea() {
 
 /* ---- recording ---- */
 
+function getSpeechFull() {
+  return speechCommitted + speechInterim;
+}
+
+function resetSpeechState() {
+  speechCommitted = '';
+  speechInterim = '';
+  speechSentLen = 0;
+  speechUid = null;
+  if (speechFlushTimer) {
+    clearInterval(speechFlushTimer);
+    speechFlushTimer = null;
+  }
+}
+
+function ensureSpeechUid() {
+  if (!speechUid) {
+    speechUid = clientId + '-' + (++uttId);
+  }
+  return speechUid;
+}
+
+function updateSpeechPreview(full) {
+  if (speechUid && entries[speechUid]) {
+    entries[speechUid].main.textContent = full;
+    logEl.scrollTop = logEl.scrollHeight;
+    return;
+  }
+  if (!full) {
+    clearLocalInterim();
+    return;
+  }
+  if (!localInterim) {
+    localInterim = document.createElement('div');
+    localInterim.className = 'entry mine interim';
+    var color = speakerColor(spk());
+    localInterim.innerHTML =
+      '<div class="spk" style="color:' + color + '">' +
+      '<span class="spk-dot" style="background:' + color + '"></span>' +
+      esc(spk()) + '</div><div class="main tent"></div>';
+    logEl.appendChild(localInterim);
+    updateEmptyState();
+  }
+  localInterim.querySelector('.main').textContent = full;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
 function clearLocalInterim() {
   if (localInterim) {
     localInterim.remove();
@@ -703,9 +759,37 @@ function clearLocalInterim() {
   }
 }
 
+function flushSpeech(isFinal) {
+  var full = getSpeechFull();
+  var delta = full.slice(speechSentLen);
+  if (!delta) return;
+  if (!isFinal && delta.length < SPEECH_MIN_CHARS) return;
+
+  var uid = ensureSpeechUid();
+  var isContinuation = !!entries[uid];
+  clearLocalInterim();
+
+  send(delta, isFinal, {
+    uid: uid,
+    continuation: isContinuation,
+    fullSrc: full,
+  });
+
+  speechSentLen = full.length;
+
+  if (isFinal) {
+    speechUid = null;
+    speechSentLen = 0;
+    speechCommitted = '';
+  }
+}
+
 function startRecording() {
   var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) { alert(TXT[UI].noSpeech); return; }
+
+  resetSpeechState();
+  clearLocalInterim();
 
   recognition = new SpeechRecognition();
   recognition.lang = SR_LANG[myLang.value] || 'ja-JP';
@@ -714,38 +798,22 @@ function startRecording() {
   recognition.maxAlternatives = 1;
 
   recognition.onresult = function(event) {
-    var finalText = '';
     var interim = '';
+    var hadFinal = false;
     for (var i = event.resultIndex; i < event.results.length; i++) {
       var r = event.results[i];
       if (r.isFinal) {
-        finalText += r[0].transcript;
+        speechCommitted += r[0].transcript;
+        hadFinal = true;
       } else {
         interim += r[0].transcript;
       }
     }
+    speechInterim = interim;
+    updateSpeechPreview(getSpeechFull());
 
-    if (interim) {
-      if (!localInterim) {
-        localInterim = document.createElement('div');
-        localInterim.className = 'entry mine interim';
-        var color = speakerColor(spk());
-        localInterim.innerHTML =
-          '<div class="spk" style="color:' + color + '">' +
-          '<span class="spk-dot" style="background:' + color + '"></span>' +
-          esc(spk()) + '</div><div class="main tent"></div>';
-        logEl.appendChild(localInterim);
-        updateEmptyState();
-      }
-      localInterim.querySelector('.main').textContent = interim;
-      logEl.scrollTop = logEl.scrollHeight;
-    } else {
-      clearLocalInterim();
-    }
-
-    if (finalText) {
-      clearLocalInterim();
-      send(finalText, true);
+    if (hadFinal) {
+      flushSpeech(true);
     }
   };
 
@@ -756,10 +824,15 @@ function startRecording() {
   };
 
   recognition.onend = function() {
+    flushSpeech(false);
     if (isRecording) {
       try { recognition.start(); } catch(e) {}
     }
   };
+
+  speechFlushTimer = setInterval(function() {
+    if (isRecording) flushSpeech(false);
+  }, SPEECH_FLUSH_MS);
 
   recognition.start();
   isRecording = true;
@@ -769,6 +842,8 @@ function startRecording() {
 }
 
 function stopRecording() {
+  flushSpeech(true);
+  resetSpeechState();
   clearLocalInterim();
   if (recognition) {
     try { recognition.stop(); } catch(e) {}
@@ -782,10 +857,24 @@ function stopRecording() {
 
 /* ---- send ---- */
 
-function send(text, isFinal) {
+function send(text, isFinal, opts) {
+  opts = opts || {};
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  var uid = clientId + '-' + (++uttId);
-  createEntry(uid, spk(), text, '', isFinal, true);
+  if (!text) return;
+
+  var uid = opts.uid || (clientId + '-' + (++uttId));
+  var isContinuation = !!opts.continuation;
+  var fullSrc = opts.fullSrc || text;
+
+  if (!isContinuation) {
+    createEntry(uid, spk(), fullSrc, '', isFinal, true);
+  } else if (entries[uid]) {
+    entries[uid].main.textContent = fullSrc;
+    if (!entries[uid].sub.textContent || entries[uid].sub.className === WAITING_CLS) {
+      entries[uid].sub.textContent = TXT[UI].waiting + '…';
+      entries[uid].sub.className = WAITING_CLS;
+    }
+  }
 
   ws.send(JSON.stringify({
     type: 'translate',
