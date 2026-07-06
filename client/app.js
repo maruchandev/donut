@@ -249,17 +249,6 @@ function checkRoomExists(id) {
   });
 }
 
-function createRoomWithCode(code) {
-  return fetch('/room', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ room: code }),
-  }).then(function(r) {
-    if (!r.ok) throw new Error('create failed');
-    return r.json();
-  });
-}
-
 function setText(id, text, html) {
   var el = document.getElementById(id);
   if (!el) return;
@@ -1020,8 +1009,11 @@ function joinRoom(val) {
   lobbyError.textContent = '';
   joinBtn.disabled = true;
   checkRoomExists(val).then(function(exists) {
-    var p = exists ? Promise.resolve() : createRoomWithCode(val);
-    return p.then(function() { showChat(val); });
+    if (!exists) {
+      lobbyError.textContent = TXT[UI].roomNotFound;
+      return;
+    }
+    showChat(val);
   }).catch(function() {
     lobbyError.textContent = TXT[UI].errPrefix + ': ' + TXT[UI].roomNotFound;
   }).finally(function() {

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -358,24 +358,14 @@ async def health():
 async def screen_page():
     return RedirectResponse(url="/screen.html", status_code=302)
 
-class RoomCreateRequest(BaseModel):
-    room: str | None = None
-
 @app.post("/room")
-async def create_room(req: RoomCreateRequest = RoomCreateRequest()):
-    if req.room:
-        if not is_valid_room_id(req.room):
-            raise HTTPException(status_code=400, detail="Invalid room ID")
-        if req.room in rooms:
-            return {"room": req.room, "created": False}
-        code = req.room
-    else:
-        code = gen_room_code()
+async def create_room():
+    code = gen_room_code()
     rooms[code] = set()
     room_ctx[code] = []
     touch_room(code)
     logger.info("Room created: %s", code)
-    return {"room": code, "created": True}
+    return {"room": code}
 
 @app.get("/room/{room_id}")
 async def room_exists(room_id: str):
