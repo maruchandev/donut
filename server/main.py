@@ -1,15 +1,20 @@
+import asyncio
 import json
 import os
 import random
+import re
+import time
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
+
+import db
 
 load_dotenv()
 
@@ -21,6 +26,8 @@ API_MODEL = os.getenv("API_MODEL", "deepseek-chat")
 API_TEMPERATURE = float(os.getenv("API_TEMPERATURE", "0.1"))
 API_MAX_TOKENS = int(os.getenv("API_MAX_TOKENS", "256"))
 ORIGINS = os.getenv("ORIGINS", "*")
+ROOM_IDLE_SECS = int(os.getenv("ROOM_IDLE_SECS", "3600"))
+ROOM_CLEANUP_INTERVAL = int(os.getenv("ROOM_CLEANUP_INTERVAL", "60"))
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -105,11 +112,64 @@ KR_NAMES = [
     "침팬지", "가젤", "하마", "표범", "망토개코원숭이", "호저", "스컹크", "족제비", "게", "가마우지",
 ]
 
+ROOM_ID_RE = re.compile(r"^\d{6}$")
+
 rooms: dict[str, set[WebSocket]] = {}
 room_clients: dict[WebSocket, str] = {}
 room_names: dict[WebSocket, str] = {}
 room_ctx: dict[str, list[str]] = {}
+room_last_active: dict[str, float] = {}
 MAX_CTX = 6
+
+def touch_room(room_id: str) -> None:
+    room_last_active[room_id] = time.time()
+
+async def dissolve_room(room_id: str, reason: str) -> None:
+    room = rooms.pop(room_id, None)
+    room_ctx.pop(room_id, None)
+    room_last_active.pop(room_id, None)
+    if not room:
+        return
+    sockets = list(room)
+    for ws in sockets:
+        room_clients.pop(ws, None)
+        room_names.pop(ws, None)
+    payload = json.dumps({"type": "room_closed", "reason": reason}, ensure_ascii=False)
+    for ws in sockets:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            pass
+    await asyncio.sleep(0.05)
+    for ws in sockets:
+        try:
+            await ws.close(code=4001, reason=reason)
+        except Exception:
+            pass
+    await db.delete_room_messages(room_id)
+    logger.info("Room %s closed (%s)", room_id, reason)
+
+async def cleanup_idle_rooms() -> None:
+    while True:
+        await asyncio.sleep(ROOM_CLEANUP_INTERVAL)
+        now = time.time()
+        expired = [
+            rid for rid, ts in list(room_last_active.items())
+            if now - ts > ROOM_IDLE_SECS
+        ]
+        for rid in expired:
+            if rid in rooms:
+                logger.info("Room %s expired after %ds idle", rid, ROOM_IDLE_SECS)
+                await dissolve_room(rid, "idle")
+
+def is_valid_room_id(room_id: str) -> bool:
+    return bool(ROOM_ID_RE.fullmatch(room_id))
+
+def gen_room_code() -> str:
+    while True:
+        code = f"{random.randint(0, 999999):06d}"
+        if code not in rooms:
+            return code
 
 def pick_name(ws: WebSocket, room_id: str, lang: str) -> str:
     pool = JP_NAMES if lang == "ja" else KR_NAMES
@@ -151,8 +211,15 @@ async def send_to(ws: WebSocket, data: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Server starting")
+    await db.init_db()
+    logger.info("Server starting (room idle timeout: %ds)", ROOM_IDLE_SECS)
+    cleanup_task = asyncio.create_task(cleanup_idle_rooms())
     yield
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
     logger.info("Server shutting down")
 
 app = FastAPI(lifespan=lifespan)
@@ -170,23 +237,39 @@ async def health():
 
 @app.post("/room")
 async def create_room():
-    code = f"{random.randint(0, 999999):06d}"
-    while code in rooms:
-        code = f"{random.randint(0, 999999):06d}"
+    code = gen_room_code()
     rooms[code] = set()
     room_ctx[code] = []
+    touch_room(code)
     logger.info("Room created: %s", code)
     return {"room": code}
 
+@app.get("/room/{room_id}")
+async def room_exists(room_id: str):
+    if not is_valid_room_id(room_id):
+        return {"exists": False}
+    return {"exists": room_id in rooms}
+
+@app.get("/room/{room_id}/messages")
+async def room_messages(
+    room_id: str,
+    limit: int = Query(default=db.DEFAULT_LIMIT, ge=1, le=db.MAX_LIMIT),
+    before_id: int | None = Query(default=None, ge=1),
+):
+    if not is_valid_room_id(room_id) or room_id not in rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    messages, has_more = await db.get_messages(room_id, limit, before_id)
+    return {"messages": messages, "has_more": has_more}
+
 @app.websocket("/ws/{room_id}")
 async def ws_endpoint(ws: WebSocket, room_id: str):
+    if not is_valid_room_id(room_id) or room_id not in rooms:
+        await ws.close(code=4004, reason="Room not found")
+        return
     await ws.accept()
-    if room_id not in rooms:
-        rooms[room_id] = set()
-    if room_id not in room_ctx:
-        room_ctx[room_id] = []
     rooms[room_id].add(ws)
     room_clients[ws] = room_id
+    touch_room(room_id)
 
     init_lang = "ja"
     try:
@@ -194,6 +277,7 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
         init_msg = json.loads(init_raw)
         if init_msg.get("type") == "init" and init_msg.get("lang") in ("ja", "ko"):
             init_lang = init_msg["lang"]
+            touch_room(room_id)
     except (json.JSONDecodeError, KeyError):
         logger.warning("Invalid init message, using default lang=ja")
     assigned = pick_name(ws, room_id, init_lang)
@@ -207,7 +291,12 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
             raw = await ws.receive_text()
             msg = json.loads(raw)
 
+            if msg.get("type") == "dissolve":
+                await dissolve_room(room_id, "dissolved")
+                return
+
             if msg.get("type") == "init":
+                touch_room(room_id)
                 if msg.get("lang") in ("ja", "ko"):
                     new_name = pick_name(ws, room_id, msg["lang"])
                     await send_to(ws, json.dumps({
@@ -217,6 +306,8 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
 
             if msg.get("type") != "translate":
                 continue
+
+            touch_room(room_id)
 
             text = msg["text"]
             target = msg["target_lang"]
@@ -290,6 +381,9 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
             if len(ctx_buf) > MAX_CTX:
                 ctx_buf.pop(0)
 
+            await db.insert_message(
+                room_id, uid, spk, text, acc, use_src, target, final,
+            )
             logger.info("translate done | room=%s uid=%s tokens=%d", room_id, uid, len(acc))
 
     except WebSocketDisconnect:
@@ -299,13 +393,10 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
     finally:
         rid = room_clients.pop(ws, None)
         if rid:
-            room = rooms.get(rid, set())
-            room.discard(ws)
+            room = rooms.get(rid)
+            if room is not None:
+                room.discard(ws)
             room_names.pop(ws, None)
-            if not room:
-                del rooms[rid]
-                room_ctx.pop(rid, None)
-                logger.info("Room %s deleted (empty)", rid)
         logger.info("WebSocket disconnected (rooms: %d)", len(rooms))
 
 static_dir = HERE.parent / "client"

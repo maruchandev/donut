@@ -1,6 +1,7 @@
 var roomId = '';
 var WS_URL = '';
 const MAX_ENTRIES = 200;
+const HISTORY_PAGE = 25;
 const WAITING_CLS = 'sub waiting';
 
 let ws = null;
@@ -11,17 +12,42 @@ let clientId = '';
 let localInterim = null;
 let nickCustomized = false;
 let intentionalClose = false;
+let hasConnected = false;
+let roomEnded = false;
+let oldestMsgId = null;
+let historyLoading = false;
+let historyExhausted = false;
+let historyLoaded = false;
+let scrollTimer = null;
 
 const lobbyEl = document.getElementById('lobby');
 const chatEl = document.getElementById('chat');
-const roomInput = document.getElementById('roomInput');
+const roomCodeEl = document.getElementById('roomCode');
+const roomDigits = Array.from(document.querySelectorAll('.room-digit'));
 const joinBtn = document.getElementById('joinBtn');
 const newRoomBtn = document.getElementById('newRoomBtn');
 const lobbyError = document.getElementById('lobbyError');
 const lobbySub = document.getElementById('lobbySub');
 const roomBadge = document.getElementById('roomBadge');
+const roomBadgeLabel = document.getElementById('roomBadgeLabel');
+const roomBadgeNum = document.getElementById('roomBadgeNum');
+const roomBadgeIcon = document.getElementById('roomBadgeIcon');
+const copyToast = document.getElementById('copyToast');
+const dissolveBtn = document.getElementById('dissolveBtn');
+const menuBtn = document.getElementById('menuBtn');
+const menuDrop = document.getElementById('menuDrop');
+const qrModal = document.getElementById('qrModal');
+const qrClose = document.getElementById('qrClose');
+const qrTitle = document.getElementById('qrTitle');
+const qrRoomNum = document.getElementById('qrRoomNum');
+const qrCodeEl = document.getElementById('qrCode');
+const qrHint = document.getElementById('qrHint');
+const qrActions = document.getElementById('qrActions');
+const qrShareBtn = document.getElementById('qrShareBtn');
+const qrCopyBtn = document.getElementById('qrCopyBtn');
 
 const logEl = document.getElementById('log');
+const historyTopEl = document.getElementById('historyTop');
 const emptyState = document.getElementById('emptyState');
 const emptyText = document.getElementById('emptyText');
 const statusMsg = document.getElementById('statusMsg');
@@ -62,7 +88,21 @@ var TXT = {
     newRoom: '新しいルームを作成',
     roomCopied: 'コピーしました',
     invalidRoom: '6桁の数字を入力してください',
+    roomNotFound: 'ルームが見つかりません',
+    roomCreateFailed: 'ルームの作成に失敗しました',
     roomLabel: 'ルーム:',
+    linkCopied: 'リンクをコピーしました',
+    dissolve: 'ルームを解散',
+    dissolveConfirm: 'ルームを解散しますか？全員が退出し、ルームは削除されます。',
+    roomDissolved: 'ルームが解散されました',
+    roomExpired: 'ルームが無操作のため終了しました（1時間）',
+    qrShare: 'ルームを共有',
+    qrHint: 'QRコードを読み取って入室',
+    qrTap: 'タップしてQRコードを表示',
+    copyLink: 'リンクをコピー',
+    share: '共有',
+    shareText: 'ルーム {room} に参加してください',
+    historyLoading: '過去の会話を読み込み中…',
   },
   ko: {
     lang: '내 언어', nick: '닉네임', ph: '이름',
@@ -81,7 +121,21 @@ var TXT = {
     newRoom: '새로운 룸 만들기',
     roomCopied: '복사했습니다',
     invalidRoom: '6자리 숫자를 입력해주세요',
+    roomNotFound: '룸을 찾을 수 없습니다',
+    roomCreateFailed: '룸 생성에 실패했습니다',
     roomLabel: '룸:',
+    linkCopied: '링크를 복사했습니다',
+    dissolve: '룸 해산',
+    dissolveConfirm: '룸을 해산하시겠습니까? 모든 참가자가 퇴장하고 룸이 삭제됩니다.',
+    roomDissolved: '룸이 해산되었습니다',
+    roomExpired: '1시간 동안 활동이 없어 룸이 종료되었습니다',
+    qrShare: '룸 공유',
+    qrHint: 'QR 코드를 스캔하여 입장',
+    qrTap: '탭하여 QR 코드 표시',
+    copyLink: '링크 복사',
+    share: '공유',
+    shareText: '룸 {room}에 참여하세요',
+    historyLoading: '이전 대화 불러오는 중…',
   },
   en: {
     lang: 'My language', nick: 'Nickname', ph: 'name',
@@ -100,15 +154,64 @@ var TXT = {
     newRoom: 'Create New Room',
     roomCopied: 'Copied',
     invalidRoom: 'Enter a 6-digit number',
+    roomNotFound: 'Room not found',
+    roomCreateFailed: 'Failed to create room',
     roomLabel: 'Room:',
+    linkCopied: 'Link copied',
+    dissolve: 'End room',
+    dissolveConfirm: 'End this room? Everyone will be removed and the room will be deleted.',
+    roomDissolved: 'Room has been ended',
+    roomExpired: 'Room closed due to inactivity (1 hour)',
+    qrShare: 'Share room',
+    qrHint: 'Scan the QR code to join',
+    qrTap: 'Tap to show QR code',
+    copyLink: 'Copy link',
+    share: 'Share',
+    shareText: 'Join room {room}',
+    historyLoading: 'Loading earlier messages…',
   },
 };
+
+function canNativeShare() {
+  return typeof navigator.share === 'function';
+}
+
+function isMobileView() {
+  return window.matchMedia('(max-width: 600px)').matches;
+}
+
+function updateShareButton() {
+  var show = isMobileView() && canNativeShare();
+  qrShareBtn.classList.toggle('hidden', !show);
+  qrActions.classList.toggle('has-share', show);
+}
+
+function roomShareUrl(id) {
+  return location.origin + location.pathname + '?room=' + id;
+}
+
+function updateRoomUrl(id) {
+  var url = id ? roomShareUrl(id) : location.pathname;
+  history.replaceState(null, '', url);
+}
+
+function parseRoomFromUrl() {
+  var room = new URLSearchParams(location.search).get('room');
+  return room && /^\d{6}$/.test(room) ? room : '';
+}
+
+function checkRoomExists(id) {
+  return fetch('/room/' + id).then(function(r) {
+    if (!r.ok) throw new Error('check failed');
+    return r.json();
+  }).then(function(data) {
+    return !!data.exists;
+  });
+}
 
 function applyUI() {
   var t = TXT[UI];
   document.documentElement.lang = UI;
-  document.getElementById('hintLang').textContent = t.lang;
-  document.getElementById('hintNick').textContent = t.nick;
   spkInput.placeholder = t.ph;
   textInput.placeholder = t.inputPh;
   inputHint.textContent = t.inputHint;
@@ -118,7 +221,169 @@ function applyUI() {
   lobbySub.textContent = t.lobbySub;
   joinBtn.textContent = t.join;
   newRoomBtn.textContent = t.newRoom;
-  roomInput.placeholder = '000000';
+  dissolveBtn.textContent = t.dissolve;
+  dissolveBtn.title = t.dissolveConfirm;
+  roomBadgeIcon.textContent = 'QR';
+  qrTitle.textContent = t.qrShare;
+  qrHint.textContent = t.qrHint;
+  qrShareBtn.textContent = t.share;
+  qrCopyBtn.textContent = t.copyLink;
+  updateRoomBadge();
+  updateShareButton();
+}
+
+function updateRoomBadge() {
+  if (!roomId) return;
+  roomBadgeLabel.textContent = TXT[UI].roomLabel;
+  roomBadgeNum.textContent = roomId;
+  roomBadge.title = TXT[UI].qrTap;
+}
+
+function hideMenu() {
+  menuDrop.classList.add('hidden');
+}
+
+function hideQrModal() {
+  qrModal.classList.add('hidden');
+  qrCodeEl.innerHTML = '';
+}
+
+function shareRoom() {
+  if (!roomId || !canNativeShare()) return;
+  var text = TXT[UI].shareText.replace('{room}', roomId);
+  navigator.share({
+    title: 'Stream Translator',
+    text: text,
+    url: roomShareUrl(roomId),
+  }).catch(function(err) {
+    if (err && err.name !== 'AbortError') copyRoomLink(null);
+  });
+}
+
+function showQrModal() {
+  hideMenu();
+  if (!roomId || typeof QRCode === 'undefined') return;
+  updateShareButton();
+  qrRoomNum.textContent = roomId;
+  qrCodeEl.innerHTML = '';
+  new QRCode(qrCodeEl, {
+    text: roomShareUrl(roomId),
+    width: 200,
+    height: 200,
+    colorDark: '#000000',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M,
+  });
+  qrModal.classList.remove('hidden');
+}
+
+var copyToastTimer = null;
+
+function showCopyToast() {
+  copyToast.textContent = TXT[UI].linkCopied;
+  copyToast.classList.add('show');
+  if (copyToastTimer) clearTimeout(copyToastTimer);
+  copyToastTimer = setTimeout(function() {
+    copyToast.classList.remove('show');
+  }, 1500);
+}
+
+function copyRoomLink(btn) {
+  if (!roomId) return;
+  navigator.clipboard.writeText(roomShareUrl(roomId)).then(function() {
+    if (btn) {
+      var orig = btn.textContent;
+      btn.textContent = TXT[UI].linkCopied;
+      setTimeout(function() { btn.textContent = orig; }, 1500);
+    } else {
+      showCopyToast();
+    }
+  }).catch(function() {});
+}
+
+function getRoomCode() {
+  return roomDigits.map(function(el) { return el.value; }).join('');
+}
+
+function setRoomCode(code) {
+  var digits = (code || '').replace(/\D/g, '').slice(0, 6);
+  for (var i = 0; i < roomDigits.length; i++) {
+    roomDigits[i].value = digits[i] || '';
+    roomDigits[i].classList.toggle('filled', !!digits[i]);
+  }
+}
+
+function clearRoomCode() {
+  setRoomCode('');
+}
+
+function focusRoomDigit(idx) {
+  if (roomDigits[idx]) roomDigits[idx].focus();
+}
+
+function setupRoomCodeInputs() {
+  roomDigits.forEach(function(input, idx) {
+    input.addEventListener('input', function() {
+      var v = this.value.replace(/\D/g, '');
+      lobbyError.textContent = '';
+      if (v.length > 1) {
+        for (var j = 0; j < v.length && idx + j < roomDigits.length; j++) {
+          roomDigits[idx + j].value = v[j];
+          roomDigits[idx + j].classList.add('filled');
+        }
+        focusRoomDigit(Math.min(idx + v.length, roomDigits.length - 1));
+        return;
+      }
+      this.value = v;
+      this.classList.toggle('filled', !!v);
+      if (v && idx < roomDigits.length - 1) focusRoomDigit(idx + 1);
+    });
+
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Backspace') {
+        if (!this.value && idx > 0) {
+          roomDigits[idx - 1].value = '';
+          roomDigits[idx - 1].classList.remove('filled');
+          focusRoomDigit(idx - 1);
+          e.preventDefault();
+        } else if (this.value) {
+          this.classList.remove('filled');
+        }
+      }
+      if (e.key === 'ArrowLeft' && idx > 0) {
+        focusRoomDigit(idx - 1);
+        e.preventDefault();
+      }
+      if (e.key === 'ArrowRight' && idx < roomDigits.length - 1) {
+        focusRoomDigit(idx + 1);
+        e.preventDefault();
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        joinBtn.click();
+      }
+    });
+
+    input.addEventListener('focus', function() {
+      this.select();
+    });
+  });
+
+  roomCodeEl.addEventListener('paste', function(e) {
+    e.preventDefault();
+    var text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
+    setRoomCode(text);
+    lobbyError.textContent = '';
+    focusRoomDigit(text.length >= 6 ? 5 : text.length);
+  });
+}
+
+function handleRoomClosed(reason) {
+  roomEnded = true;
+  intentionalClose = true;
+  if (ws) { ws.close(); ws = null; }
+  var msg = reason === 'idle' ? TXT[UI].roomExpired : TXT[UI].roomDissolved;
+  showLobby(msg);
 }
 
 function speakerColor(name) {
@@ -148,28 +413,106 @@ function trimEntries() {
   }
 }
 
-function showChat(id) {
-  roomId = id;
-  WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/' + roomId;
-  roomBadge.textContent = TXT[UI].roomLabel + ' ' + roomId;
-  lobbyEl.classList.add('hidden');
-  chatEl.style.display = 'flex';
-  chatEl.style.flexDirection = 'column';
-  connect();
+function clearLog() {
+  entries = {};
+  oldestMsgId = null;
+  historyLoading = false;
+  historyExhausted = false;
+  historyLoaded = false;
+  logEl.querySelectorAll('.entry').forEach(function(el) { el.remove(); });
+  historyTopEl.classList.add('hidden');
+  historyTopEl.textContent = '';
+  updateEmptyState();
 }
 
-function showLobby() {
+function loadHistory(beforeId, isInitial) {
+  if (!roomId || historyLoading) return;
+  if (!isInitial && historyExhausted) return;
+  historyLoading = true;
+  historyTopEl.textContent = TXT[UI].historyLoading;
+  historyTopEl.classList.remove('hidden');
+
+  var url = '/room/' + roomId + '/messages?limit=' + HISTORY_PAGE;
+  if (beforeId) url += '&before_id=' + beforeId;
+
+  fetch(url).then(function(r) {
+    if (!r.ok) throw new Error('history failed');
+    return r.json();
+  }).then(function(data) {
+    var msgs = data.messages || [];
+    if (msgs.length) {
+      oldestMsgId = msgs[0].id;
+      if (isInitial) {
+        msgs.forEach(function(m) { renderHistoryMessage(m, false); });
+        logEl.scrollTop = logEl.scrollHeight;
+      } else {
+        var prevHeight = logEl.scrollHeight;
+        msgs.forEach(function(m) { renderHistoryMessage(m, true); });
+        logEl.scrollTop = logEl.scrollHeight - prevHeight;
+      }
+    }
+    if (!data.has_more) historyExhausted = true;
+    historyTopEl.classList.add('hidden');
+    historyTopEl.textContent = '';
+    updateEmptyState();
+  }).catch(function() {
+    historyTopEl.classList.add('hidden');
+    historyTopEl.textContent = '';
+  }).finally(function() {
+    historyLoading = false;
+  });
+}
+
+function renderHistoryMessage(msg, prepend) {
+  var uid = 'h-' + msg.id;
+  if (entries[uid]) return;
+  var ml = myLang.value;
+  var isMine = msg.src_lang === ml;
+  var mainText = isMine ? msg.src : (msg.full || '');
+  var subText = isMine ? (msg.full || '') : msg.src;
+  createEntry(uid, msg.spk || '?', mainText, subText, true, isMine, {
+    prepend: prepend,
+    ts: Math.round((msg.ts || 0) * 1000),
+  });
+}
+
+function showChat(id, opts) {
+  if (!id || !/^\d{6}$/.test(id)) return;
+  opts = opts || {};
+  hasConnected = false;
+  roomEnded = false;
+  clearLog();
+  roomId = id;
+  WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/' + roomId;
+  updateRoomBadge();
+  updateRoomUrl(roomId);
+  lobbyEl.classList.add('hidden');
+  chatEl.classList.add('open');
+  dissolveBtn.disabled = false;
+  connect();
+  if (opts.showQr) showQrModal();
+}
+
+function showLobby(errMsg) {
+  hideQrModal();
+  hideMenu();
+  copyToast.classList.remove('show');
+  if (copyToastTimer) clearTimeout(copyToastTimer);
   if (ws) { intentionalClose = true; ws.close(); ws = null; }
+  dissolveBtn.disabled = false;
+  roomId = '';
+  updateRoomUrl('');
   lobbyEl.classList.remove('hidden');
-  chatEl.style.display = 'none';
-  roomInput.value = '';
-  lobbyError.textContent = '';
-  roomInput.focus();
+  chatEl.classList.remove('open');
+  clearRoomCode();
+  lobbyError.textContent = errMsg || '';
+  focusRoomDigit(0);
 }
 
 function connect() {
   if (!roomId) return;
   intentionalClose = false;
+  var gotSystem = false;
   ws = new WebSocket(WS_URL);
   ws.onopen = function() {
     connDot.className = 'dot on';
@@ -183,22 +526,45 @@ function connect() {
     setStatus(TXT[UI].conn);
     ws.send(JSON.stringify({ type: 'init', lang: myLang.value }));
   };
-  ws.onclose = function() {
+  ws.onclose = function(ev) {
     connDot.className = 'dot off';
     connLabel.textContent = TXT[UI].disc;
     recordBtn.disabled = true;
     textInput.disabled = true;
     sendBtn.disabled = true;
     if (isRecording) stopRecording();
-    if (!intentionalClose) {
-      setStatus(TXT[UI].recon);
-      setTimeout(connect, 2000);
+    if (!intentionalClose && !hasConnected && !gotSystem) {
+      showLobby(TXT[UI].roomNotFound);
+      return;
+    }
+    if (!intentionalClose && !roomEnded && hasConnected) {
+      checkRoomExists(roomId).then(function(exists) {
+        if (!exists) {
+          showLobby(TXT[UI].roomNotFound);
+          return;
+        }
+        setStatus(TXT[UI].recon);
+        setTimeout(connect, 2000);
+      }).catch(function() {
+        setStatus(TXT[UI].recon);
+        setTimeout(connect, 2000);
+      });
     }
   };
   ws.onmessage = function(e) {
     var msg = JSON.parse(e.data);
+    if (msg.type === 'room_closed') {
+      handleRoomClosed(msg.reason);
+      return;
+    }
     if (msg.type === 'system' && msg.speaker_id) {
+      gotSystem = true;
+      hasConnected = true;
       if (!nickCustomized) spkInput.value = msg.speaker_id;
+      if (!historyLoaded) {
+        historyLoaded = true;
+        loadHistory(null, true);
+      }
       return;
     }
     handleServerMsg(msg);
@@ -256,11 +622,12 @@ function handleServerMsg(msg) {
   }
 }
 
-function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine) {
+function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
+  opts = opts || {};
   var row = document.createElement('div');
   row.className = 'entry ' + (isMine ? 'mine' : 'other');
   row.dataset.uid = uid;
-  row.dataset.ts = Date.now();
+  row.dataset.ts = opts.ts || Date.now();
 
   var color = speakerColor(spkLabel);
   var spkSpan = document.createElement('div');
@@ -288,8 +655,14 @@ function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine) {
   row.appendChild(spkSpan);
   row.appendChild(main);
   row.appendChild(sub);
-  logEl.appendChild(row);
-  logEl.scrollTop = logEl.scrollHeight;
+  if (opts.prepend) {
+    var anchor = logEl.querySelector('.entry');
+    if (anchor) logEl.insertBefore(row, anchor);
+    else logEl.appendChild(row);
+  } else {
+    logEl.appendChild(row);
+    if (!opts.noScroll) logEl.scrollTop = logEl.scrollHeight;
+  }
 
   entries[uid] = { row: row, main: main, sub: sub, isMine: !!isMine };
   updateEmptyState();
@@ -436,16 +809,38 @@ function sendText() {
 
 /* ---- lobby events ---- */
 
+function joinRoom(val) {
+  if (!/^\d{6}$/.test(val)) {
+    lobbyError.textContent = TXT[UI].invalidRoom;
+    return;
+  }
+  lobbyError.textContent = '';
+  joinBtn.disabled = true;
+  checkRoomExists(val).then(function(exists) {
+    if (!exists) {
+      lobbyError.textContent = TXT[UI].roomNotFound;
+      return;
+    }
+    showChat(val);
+  }).catch(function() {
+    lobbyError.textContent = TXT[UI].errPrefix + ': ' + TXT[UI].roomNotFound;
+  }).finally(function() {
+    joinBtn.disabled = false;
+  });
+}
+
 newRoomBtn.addEventListener('click', function() {
   lobbyError.textContent = '';
   newRoomBtn.disabled = true;
   newRoomBtn.textContent = '...';
   fetch('/room', { method: 'POST' }).then(function(r) {
+    if (!r.ok) throw new Error(TXT[UI].roomCreateFailed);
     return r.json();
   }).then(function(data) {
-    showChat(data.room);
+    if (!data || !data.room) throw new Error(TXT[UI].roomCreateFailed);
+    showChat(data.room, { showQr: true });
   }).catch(function(err) {
-    lobbyError.textContent = TXT[UI].errPrefix + ': ' + err.message;
+    lobbyError.textContent = TXT[UI].errPrefix + ': ' + (err.message || TXT[UI].roomCreateFailed);
   }).finally(function() {
     newRoomBtn.disabled = false;
     newRoomBtn.textContent = TXT[UI].newRoom;
@@ -453,30 +848,48 @@ newRoomBtn.addEventListener('click', function() {
 });
 
 joinBtn.addEventListener('click', function() {
-  var val = roomInput.value.trim();
-  if (!/^\d{6}$/.test(val)) {
-    lobbyError.textContent = TXT[UI].invalidRoom;
-    return;
-  }
-  lobbyError.textContent = '';
-  showChat(val);
+  joinRoom(getRoomCode());
 });
 
-roomInput.addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') { e.preventDefault(); joinBtn.click(); }
+dissolveBtn.addEventListener('click', function() {
+  hideMenu();
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!confirm(TXT[UI].dissolveConfirm)) return;
+  dissolveBtn.disabled = true;
+  ws.send(JSON.stringify({ type: 'dissolve' }));
 });
 
-roomInput.addEventListener('input', function() {
-  this.value = this.value.replace(/\D/g, '').slice(0, 6);
-  lobbyError.textContent = '';
+menuBtn.addEventListener('click', function(e) {
+  e.stopPropagation();
+  menuDrop.classList.toggle('hidden');
+});
+
+menuDrop.addEventListener('click', function(e) {
+  e.stopPropagation();
+});
+
+document.addEventListener('click', hideMenu);
+
+qrClose.addEventListener('click', hideQrModal);
+
+qrModal.addEventListener('click', function(e) {
+  if (e.target === qrModal) hideQrModal();
+});
+
+qrShareBtn.addEventListener('click', shareRoom);
+
+qrCopyBtn.addEventListener('click', function() {
+  copyRoomLink(qrCopyBtn);
+});
+
+window.addEventListener('resize', updateShareButton);
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && !qrModal.classList.contains('hidden')) hideQrModal();
 });
 
 roomBadge.addEventListener('click', function() {
-  navigator.clipboard.writeText(roomId).then(function() {
-    var orig = roomBadge.textContent;
-    roomBadge.textContent = TXT[UI].roomCopied;
-    setTimeout(function() { roomBadge.textContent = orig; }, 1500);
-  }).catch(function() {});
+  showQrModal();
 });
 
 /* ---- chat events ---- */
@@ -514,9 +927,27 @@ textInput.addEventListener('keydown', function(e) {
 
 function setStatus(s) { statusMsg.textContent = s; }
 
+setupRoomCodeInputs();
+logEl.addEventListener('scroll', function() {
+  if (scrollTimer) clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(function() {
+    scrollTimer = null;
+    if (logEl.scrollTop < 60 && oldestMsgId && !historyExhausted && !historyLoading) {
+      loadHistory(oldestMsgId, false);
+    }
+  }, 120);
+});
+
 applyUI();
 myLang.value = UI === 'ko' ? 'ko' : 'ja';
 dirHint.textContent = TXT[UI].dir[myLang.value];
 setStatus(TXT[UI].ready);
 updateEmptyState();
-roomInput.focus();
+
+var urlRoom = parseRoomFromUrl();
+if (urlRoom) {
+  setRoomCode(urlRoom);
+  joinRoom(urlRoom);
+} else {
+  focusRoomDigit(0);
+}
