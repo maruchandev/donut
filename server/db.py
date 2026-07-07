@@ -118,6 +118,27 @@ async def get_messages(
     return [_row_to_dict(r) for r in rows], has_more
 
 
+async def update_message_by_uid(
+    room_id: str,
+    uid: str,
+    src: str,
+    tgt: str,
+    src_lang: str,
+    tgt_lang: str,
+) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            UPDATE messages
+            SET src = ?, tgt = ?, src_lang = ?, tgt_lang = ?, is_final = 1, created_at = ?
+            WHERE room_id = ? AND uid = ?
+            """,
+            (src, tgt, src_lang, tgt_lang, time.time(), room_id, uid),
+        )
+        await db.commit()
+        return (cursor.rowcount or 0) > 0
+
+
 async def delete_room_messages(room_id: str) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM messages WHERE room_id = ?", (room_id,))

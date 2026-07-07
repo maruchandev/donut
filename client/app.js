@@ -27,11 +27,11 @@ let speechCommitted = '';
 let speechInterim = '';
 let speechSentLen = 0;
 let speechFlushTimer = null;
+let speechResultLen = 0;
 
 const lobbyEl = document.getElementById('lobby');
 const chatEl = document.getElementById('chat');
-const scrollStartBtn = document.getElementById('scrollStartBtn');
-const heroCtaBtn = document.getElementById('heroCtaBtn');
+
 const roomCodeEl = document.getElementById('roomCode');
 const roomDigits = Array.from(document.querySelectorAll('.room-digit'));
 const joinBtn = document.getElementById('joinBtn');
@@ -87,11 +87,11 @@ var TXT = {
   ja: {
     lang: '話す言語', nick: 'ニックネーム', ph: 'なまえ',
     conn: '接続済', disc: '切断', recon: '再接続中...',
-    ready: '準備完了', rec: '録音', stop: '停止',
-    recOn: '録音中', recOff: '停止', send: '送信',
+    ready: '準備完了', rec: '話す', stop: '停止',
+    recOn: '聞き取り中', recOff: '準備完了', send: '送信',
     inputPh: 'テキストを入力...',
     inputHint: 'Enter で送信 · Ctrl+Enter で改行',
-    empty: '録音ボタンまたはテキスト入力で翻訳を始めましょう',
+    empty: '「話す」ボタンまたはテキスト入力で翻訳を始めましょう',
     waiting: '翻訳中',
     errPrefix: 'エラー',
     noSpeech: '音声認識に対応していないブラウザです',
@@ -103,7 +103,8 @@ var TXT = {
     invalidRoom: '6桁の数字を入力してください',
     roomNotFound: 'ルームが見つかりません',
     roomCreateFailed: 'ルームの作成に失敗しました',
-    roomLabel: 'ルーム:',
+    roomLabel: 'ルーム',
+    heroBadge: '会話も講演も',
     linkCopied: 'リンクをコピーしました',
     screen: '大画面表示',
     dissolve: 'ルームを解散',
@@ -119,21 +120,23 @@ var TXT = {
     shareText: 'どーなつのルーム {room} に来てね',
     historyLoading: '過去の会話を読み込み中…',
     serviceName: 'どーなつ',
-    scrollStart: 'はじめる',
-    heroDesc: '日韓の会話を、まるくつなぐ。話すだけで翻訳が届くカジュアル通訳。ルーム番号を共有して、すぐにはじめられます。',
-    heroCta: 'ルームに入る',
+    heroDesc: 'カジュアルな会話から講演・会議まで。話すだけで日韓翻訳が届くリアルタイム通訳。ルーム番号を共有して、すぐに始められます。',
     footerTagline: '日韓リアルタイム通訳',
     pageTitle: 'どーなつ — 日韓リアルタイム通訳',
     backHome: 'トップへ戻る',
+    edit: '修正',
+    editHint: '認識された文章を直して、再翻訳します',
+    editCancel: 'キャンセル',
+    editSave: '再翻訳して送信',
   },
   ko: {
     lang: '내 언어', nick: '닉네임', ph: '이름',
     conn: '연결됨', disc: '연결 끊김', recon: '재연결 중...',
-    ready: '준비 완료', rec: '녹음', stop: '중지',
-    recOn: '녹음 중', recOff: '중지', send: '보내기',
+    ready: '준비 완료', rec: '말하기', stop: '중지',
+    recOn: '듣는 중', recOff: '준비 완료', send: '보내기',
     inputPh: '텍스트 입력...',
     inputHint: 'Enter 전송 · Ctrl+Enter 줄바꿈',
-    empty: '녹음 버튼이나 텍스트 입력으로 번역을 시작하세요',
+    empty: '「말하기」버튼이나 텍스트 입력으로 번역을 시작하세요',
     waiting: '번역 중',
     errPrefix: '오류',
     noSpeech: '이 브라우저는 음성 인식을 지원하지 않습니다',
@@ -145,7 +148,8 @@ var TXT = {
     invalidRoom: '6자리 숫자를 입력해주세요',
     roomNotFound: '룸을 찾을 수 없습니다',
     roomCreateFailed: '룸 생성에 실패했습니다',
-    roomLabel: '룸:',
+    roomLabel: '룸',
+    heroBadge: '대화부터 강연까지',
     linkCopied: '링크를 복사했습니다',
     screen: '대형 화면',
     dissolve: '룸 해산',
@@ -161,21 +165,23 @@ var TXT = {
     shareText: 'どーなつ 룸 {room}에 와요',
     historyLoading: '이전 대화 불러오는 중…',
     serviceName: 'どーなつ',
-    scrollStart: '시작하기',
-    heroDesc: '일한 대화를, 둥글게 이어요. 말하기만 하면 번역이 도착하는 캐주얼 통역. 룸 번호를 공유해서 바로 시작하세요.',
-    heroCta: '룸 입장',
+    heroDesc: '캐주얼 대화부터 강연·회의까지. 말하기만 하면 일한 번역이 도착하는 실시간 통역. 룸 번호를 공유해 바로 시작하세요.',
     footerTagline: '일한 실시간 통역',
     pageTitle: 'どーなつ — 일한 실시간 통역',
     backHome: '홈으로 돌아가기',
+    edit: '수정',
+    editHint: '인식된 문장을 고친 뒤 다시 번역합니다',
+    editCancel: '취소',
+    editSave: '재번역 후 전송',
   },
   en: {
     lang: 'My language', nick: 'Nickname', ph: 'name',
     conn: 'Connected', disc: 'Disconnected', recon: 'Reconnecting...',
-    ready: 'Ready', rec: 'Record', stop: 'Stop',
-    recOn: 'Recording', recOff: 'Stopped', send: 'Send',
+    ready: 'Ready', rec: 'Speak', stop: 'Stop',
+    recOn: 'Listening', recOff: 'Ready', send: 'Send',
     inputPh: 'Type a message...',
     inputHint: 'Enter to send · Ctrl+Enter for newline',
-    empty: 'Press Record or type a message to start translating',
+    empty: 'Press Speak or type a message to start translating',
     waiting: 'Translating',
     errPrefix: 'Error',
     noSpeech: 'Speech recognition is not supported in this browser',
@@ -187,7 +193,8 @@ var TXT = {
     invalidRoom: 'Enter a 6-digit number',
     roomNotFound: 'Room not found',
     roomCreateFailed: 'Failed to create room',
-    roomLabel: 'Room:',
+    roomLabel: 'Room',
+    heroBadge: 'Chat to conference',
     linkCopied: 'Link copied',
     screen: 'Large screen',
     dissolve: 'End room',
@@ -203,12 +210,14 @@ var TXT = {
     shareText: 'Join どーなつ room {room}',
     historyLoading: 'Loading earlier messages…',
     serviceName: 'どーなつ',
-    scrollStart: 'Get started',
-    heroDesc: 'Connect Japan & Korea, one chat at a time. Speak and see translations instantly. Share a room code to begin.',
-    heroCta: 'Join a room',
+    heroDesc: 'From casual chats to lectures and meetings. Speak and get JP↔KR translations instantly. Share a room code to begin.',
     footerTagline: 'JP↔KR real-time interpretation',
     pageTitle: 'どーなつ — JP↔KR Interpretation',
     backHome: 'Back to home',
+    edit: 'Edit',
+    editHint: 'Correct the recognized text, then re-translate',
+    editCancel: 'Cancel',
+    editSave: 'Re-translate',
   },
 };
 
@@ -287,9 +296,9 @@ function applyUI() {
   setText('heroTitle', t.serviceName);
   setText('chatLogoName', t.serviceName);
   if (homeBtn) homeBtn.title = t.backHome;
-  setText('scrollStartBtn', t.scrollStart);
+  setText('heroBadge', t.heroBadge);
   setText('heroDesc', t.heroDesc);
-  setText('heroCtaBtn', t.heroCta);
+  setText('langLabel', t.lang);
   setText('footerTagline', t.footerTagline);
   updateRoomBadge();
   updateScreenLink();
@@ -483,7 +492,7 @@ function speakerColor(name) {
 
 function updateEmptyState() {
   var hasEntries = logEl.querySelector('.entry');
-  emptyState.style.display = hasEntries ? 'none' : 'flex';
+  emptyState.classList.toggle('hidden', !!hasEntries);
 }
 
 function trimEntries() {
@@ -504,6 +513,7 @@ function trimEntries() {
 
 function clearLog() {
   entries = {};
+  ownUids = {};
   oldestMsgId = null;
   historyLoading = false;
   historyExhausted = false;
@@ -553,10 +563,11 @@ function loadHistory(beforeId, isInitial) {
 }
 
 function renderHistoryMessage(msg, prepend) {
-  var uid = 'h-' + msg.id;
-  if (entries[uid]) return;
+  var uid = msg.uid;
+  if (!uid || entries[uid]) return;
   var ml = myLang.value;
-  var isMine = msg.src_lang === ml;
+  var isMine = msg.src_lang === ml || msg.spk === spk();
+  if (isMine) ownUids[uid] = true;
   var mainText = isMine ? msg.src : (msg.full || '');
   var subText = isMine ? (msg.full || '') : msg.src;
   createEntry(uid, msg.spk || '?', mainText, subText, true, isMine, {
@@ -664,6 +675,181 @@ function connect() {
 }
 
 var entries = {};
+var ownUids = {};
+var editingUid = null;
+
+var EDIT_ICON_SVG =
+  '<svg class="edit-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M12 20h9"/>' +
+  '<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>' +
+  '</svg>';
+
+function createEditButton(uid) {
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn-edit';
+  btn.setAttribute('aria-label', TXT[UI].edit);
+  btn.innerHTML = EDIT_ICON_SVG;
+  btn.addEventListener('click', function(ev) {
+    ev.stopPropagation();
+    startEditEntry(uid);
+  });
+  return btn;
+}
+
+function showEditButton(e) {
+  if (!e || !e.isMine || !e.editBtn) return;
+  e.row.classList.add('is-final');
+  e.row.classList.remove('revising');
+  e.editBtn.hidden = false;
+}
+
+function hideEditButton(e) {
+  if (!e || !e.editBtn) return;
+  e.editBtn.hidden = true;
+}
+
+function finishEditEntry(restore) {
+  if (!editingUid) return;
+  var e = entries[editingUid];
+  if (!e) {
+    editingUid = null;
+    return;
+  }
+  e.row.classList.remove('editing');
+  e.main.style.display = '';
+  e.sub.style.display = '';
+  if (e.editBtn && e.row.classList.contains('is-final')) e.editBtn.hidden = false;
+  if (e.editArea) { e.editArea.remove(); e.editArea = null; }
+  if (e.editHint) { e.editHint.remove(); e.editHint = null; }
+  if (e.editActions) { e.editActions.remove(); e.editActions = null; }
+  if (restore) {
+    e.main.textContent = e._editOrigMain || e.main.textContent;
+    e.sub.textContent = e._editOrigSub || e.sub.textContent;
+  }
+  delete e._editOrigMain;
+  delete e._editOrigSub;
+  editingUid = null;
+}
+
+function startEditEntry(uid) {
+  var e = entries[uid];
+  if (!e || !e.isMine || editingUid === uid) return;
+  if (editingUid) finishEditEntry(true);
+
+  editingUid = uid;
+  e._editOrigMain = e.srcText || e.main.textContent;
+  e._editOrigSub = e.sub.textContent;
+  e.row.classList.add('editing');
+  e.main.style.display = 'none';
+  e.sub.style.display = 'none';
+  hideEditButton(e);
+
+  var area = document.createElement('textarea');
+  area.className = 'edit-area';
+  area.value = e._editOrigMain;
+  area.rows = 3;
+
+  var hint = document.createElement('div');
+  hint.className = 'edit-hint';
+  hint.textContent = TXT[UI].editHint;
+
+  var actions = document.createElement('div');
+  actions.className = 'edit-actions';
+
+  var cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn-edit-cancel';
+  cancelBtn.textContent = TXT[UI].editCancel;
+  cancelBtn.addEventListener('click', function() { finishEditEntry(true); });
+
+  var saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'btn-edit-save';
+  saveBtn.textContent = TXT[UI].editSave;
+  saveBtn.addEventListener('click', function() { submitRetranslate(uid); });
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(saveBtn);
+
+  e.row.insertBefore(area, e.sub);
+  e.row.insertBefore(hint, e.sub);
+  e.row.appendChild(actions);
+  e.editArea = area;
+  e.editHint = hint;
+  e.editActions = actions;
+  area.focus();
+  area.setSelectionRange(area.value.length, area.value.length);
+}
+
+function submitRetranslate(uid) {
+  var e = entries[uid];
+  if (!e || !e.editArea) return;
+  var text = e.editArea.value.trim();
+  if (!text) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+  finishEditEntry(false);
+  e.awaitingRevision = true;
+  e.srcText = text;
+  e.row.classList.add('revising');
+  e.row.classList.remove('error');
+  e.main.textContent = text;
+  e.main.className = 'main tent';
+  e.main.style.display = '';
+  e.sub.textContent = TXT[UI].waiting + '…';
+  e.sub.className = WAITING_CLS;
+  e.sub.style.display = '';
+  hideEditButton(e);
+
+  ws.send(JSON.stringify({
+    type: 'retranslate',
+    uid: uid,
+    text: text,
+    source_lang: 'auto',
+    target_lang: 'auto',
+    speaker_id: spk(),
+  }));
+}
+
+function findEntryByUid(uid) {
+  if (entries[uid]) return entries[uid];
+  var row = logEl.querySelector('.entry[data-uid="' + uid + '"]');
+  if (!row) return null;
+  var e = {
+    row: row,
+    head: row.querySelector('.entry-head'),
+    main: row.querySelector('.main'),
+    sub: row.querySelector('.sub'),
+    editBtn: row.querySelector('.btn-edit'),
+    isMine: row.classList.contains('mine'),
+  };
+  entries[uid] = e;
+  return e;
+}
+
+function applyEntryText(e, src, tgt, isFinal) {
+  if (!e || !e.main || !e.sub) return;
+  var isMine = e.isMine;
+  if (isMine) {
+    e.main.textContent = src || '';
+    e.sub.textContent = tgt || '';
+    e.main.className = 'main ' + (isFinal ? 'final' : 'tent');
+    e.sub.className = tgt ? ('sub ' + (isFinal ? 'final' : 'tent')) : WAITING_CLS;
+    if (src) e.srcText = src;
+  } else {
+    e.main.textContent = tgt || '';
+    e.sub.textContent = src || '';
+    e.main.className = 'main ' + (tgt ? (isFinal ? 'final' : 'tent') : 'tent');
+    e.sub.className = 'sub final';
+  }
+  if (isFinal) {
+    e.row.classList.remove('interim', 'revising');
+    e.row.classList.add('is-final');
+    e.row.dataset.final = 'true';
+    if (isMine) showEditButton(e);
+  }
+}
 
 function handleServerMsg(msg) {
   if (msg.type === 'error') {
@@ -673,44 +859,52 @@ function handleServerMsg(msg) {
 
   var uid = msg.uid;
   var isFinal = msg.final;
+  var revised = !!msg.revised;
 
-  if (!entries[uid]) {
+  if (revised) {
+    var revEntry = findEntryByUid(uid);
+    if (!revEntry) return;
+    if (editingUid === uid) finishEditEntry(false);
+    revEntry.awaitingRevision = false;
+    if (msg.type === 't_chunk') {
+      applyEntryText(revEntry, msg.src, msg.acc || '', false);
+      return;
+    }
+    if (msg.type === 't_done') {
+      applyEntryText(revEntry, msg.src, msg.full || '', true);
+      return;
+    }
+    return;
+  }
+
+  var e = findEntryByUid(uid);
+  if (e && e.awaitingRevision) return;
+
+  if (!e) {
     if (!msg.src) return;
     var ml = myLang.value;
-    var isMine = msg.src_lang === ml;
+    var isMine = !!ownUids[uid] || msg.src_lang === ml;
     var mainText = isMine ? msg.src : (msg.acc || msg.full || '');
     var subText = isMine ? (msg.acc || msg.full || '') : msg.src;
     createEntry(uid, msg.spk || '?', mainText, subText, isFinal, isMine);
     return;
   }
 
-  var e = entries[uid];
   var isMine = e.isMine;
 
   if (msg.type === 't_chunk') {
-    if (isMine) {
-      e.main.textContent = msg.src;
-      e.sub.textContent = msg.acc || '';
-      e.sub.className = msg.acc ? 'sub ' + (isFinal ? 'final' : 'tent') : WAITING_CLS;
-    } else {
-      e.main.textContent = msg.acc || '';
-      e.sub.textContent = msg.src;
-      e.main.className = 'main ' + (msg.acc ? (isFinal ? 'final' : 'tent') : 'tent');
-      e.sub.className = 'sub final';
-    }
+    if (editingUid === uid) finishEditEntry(false);
+    if (isMine) e.row.classList.remove('revising');
+    applyEntryText(e, msg.src, msg.acc || '', isFinal);
   }
 
   if (msg.type === 't_done') {
-    if (isMine) {
-      e.main.textContent = msg.src;
-      e.sub.textContent = msg.full || '';
-    } else {
-      e.main.textContent = msg.full || '';
-      e.sub.textContent = msg.src;
-    }
-    e.main.className = 'main final';
-    e.sub.className = 'sub final';
-    if (isFinal) e.row.dataset.final = 'true';
+    if (editingUid === uid) finishEditEntry(false);
+    applyEntryText(e, msg.src, msg.full || '', true);
+  }
+
+  if (msg.type === 't_chunk' && isFinal && isMine) {
+    showEditButton(e);
   }
 }
 
@@ -731,6 +925,10 @@ function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
   spkSpan.appendChild(dot);
   spkSpan.appendChild(document.createTextNode(esc(spkLabel)));
 
+  var head = document.createElement('div');
+  head.className = 'entry-head';
+  head.appendChild(spkSpan);
+
   var main = document.createElement('div');
   main.className = 'main ' + (isFinal ? 'final' : 'tent');
   main.textContent = mainText;
@@ -744,9 +942,18 @@ function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
     sub.textContent = subText;
   }
 
-  row.appendChild(spkSpan);
+  row.appendChild(head);
   row.appendChild(main);
   row.appendChild(sub);
+
+  var editBtn = null;
+  if (isMine) {
+    editBtn = createEditButton(uid);
+    editBtn.hidden = true;
+    head.appendChild(editBtn);
+    if (isFinal) row.classList.add('is-final');
+  }
+
   if (opts.prepend) {
     var anchor = logEl.querySelector('.entry');
     if (anchor) logEl.insertBefore(row, anchor);
@@ -756,7 +963,11 @@ function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
     if (!opts.noScroll) logEl.scrollTop = logEl.scrollHeight;
   }
 
-  entries[uid] = { row: row, main: main, sub: sub, isMine: !!isMine };
+  entries[uid] = {
+    row: row, head: head, main: main, sub: sub, editBtn: editBtn,
+    isMine: !!isMine, srcText: mainText,
+  };
+  if (isMine && isFinal) showEditButton(entries[uid]);
   updateEmptyState();
   trimEntries();
 }
@@ -764,9 +975,12 @@ function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
 function showError(message, uid) {
   if (uid && entries[uid]) {
     var e = entries[uid];
+    e.awaitingRevision = false;
+    e.row.classList.remove('revising');
     e.sub.textContent = TXT[UI].errPrefix + ': ' + message;
     e.sub.className = 'sub tent';
     e.row.classList.add('error');
+    if (e.isMine && e.row.classList.contains('is-final')) showEditButton(e);
     return;
   }
   var row = document.createElement('div');
@@ -800,10 +1014,31 @@ function resetSpeechState() {
   speechCommitted = '';
   speechInterim = '';
   speechSentLen = 0;
+  speechResultLen = 0;
   if (speechFlushTimer) {
     clearInterval(speechFlushTimer);
     speechFlushTimer = null;
   }
+}
+
+function rebuildSpeechFromResults(results) {
+  var committed = '';
+  var interim = '';
+  for (var i = 0; i < results.length; i++) {
+    if (results[i].isFinal) {
+      committed += results[i][0].transcript;
+    }
+  }
+  for (var j = results.length - 1; j >= 0; j--) {
+    if (!results[j].isFinal) {
+      interim = results[j][0].transcript;
+      break;
+    }
+  }
+  speechCommitted = committed;
+  speechInterim = interim;
+  var fullLen = (speechCommitted + speechInterim).length;
+  if (speechSentLen > fullLen) speechSentLen = fullLen;
 }
 
 function splitAtSentenceEnds(text) {
@@ -862,7 +1097,9 @@ function flushSpeech(forceFinal) {
   if (!unsent) {
     if (forceFinal) {
       speechCommitted = '';
+      speechInterim = '';
       speechSentLen = 0;
+      clearLocalInterim();
     }
     return;
   }
@@ -878,9 +1115,10 @@ function flushSpeech(forceFinal) {
   }
 
   if (forceFinal) {
-    var tail = split.remainder.trim();
+    var tail = getSpeechRemainder().trim();
     if (tail) sendSpeechSentence(tail);
     speechCommitted = '';
+    speechInterim = '';
     speechSentLen = 0;
     clearLocalInterim();
   }
@@ -899,25 +1137,23 @@ function startRecording() {
   recognition.interimResults = true;
   recognition.maxAlternatives = 1;
 
+  recognition.onstart = function() {
+    speechResultLen = 0;
+  };
+
   recognition.onresult = function(event) {
-    var interim = '';
+    rebuildSpeechFromResults(event.results);
+    speechResultLen = event.results.length;
+    updateSpeechPreview();
+
     var hadFinal = false;
     for (var i = event.resultIndex; i < event.results.length; i++) {
-      var r = event.results[i];
-      if (r.isFinal) {
-        speechCommitted += r[0].transcript;
+      if (event.results[i].isFinal) {
         hadFinal = true;
-      } else {
-        interim += r[0].transcript;
+        break;
       }
     }
-    speechInterim = interim;
-    updateSpeechPreview();
-    flushSpeech(false);
-
-    if (hadFinal) {
-      flushSpeech(true);
-    }
+    flushSpeech(hadFinal);
   };
 
   recognition.onerror = function(event) {
@@ -927,7 +1163,6 @@ function startRecording() {
   };
 
   recognition.onend = function() {
-    flushSpeech(false);
     if (isRecording) {
       try { recognition.start(); } catch(e) {}
     }
@@ -966,6 +1201,7 @@ function send(text, isFinal, opts) {
   if (!text) return;
 
   var uid = opts.uid || (clientId + '-' + (++uttId));
+  ownUids[uid] = true;
   var isContinuation = !!opts.continuation;
   var fullSrc = opts.fullSrc || text;
 
@@ -973,6 +1209,7 @@ function send(text, isFinal, opts) {
     createEntry(uid, spk(), fullSrc, '', isFinal, true);
   } else if (entries[uid]) {
     entries[uid].main.textContent = fullSrc;
+    entries[uid].srcText = fullSrc;
     if (!entries[uid].sub.textContent || entries[uid].sub.className === WAITING_CLS) {
       entries[uid].sub.textContent = TXT[UI].waiting + '…';
       entries[uid].sub.className = WAITING_CLS;
@@ -1049,9 +1286,6 @@ if (homeBtn) {
     showLobby();
   });
 }
-
-if (scrollStartBtn) scrollStartBtn.addEventListener('click', scrollToStart);
-if (heroCtaBtn) heroCtaBtn.addEventListener('click', scrollToStart);
 
 dissolveBtn.addEventListener('click', function() {
   hideMenu();

@@ -120,11 +120,29 @@ ROOM_ID_RE = re.compile(r"^\d{6}$")
 rooms: dict[str, set[WebSocket]] = {}
 room_clients: dict[WebSocket, str] = {}
 room_names: dict[WebSocket, str] = {}
-room_ctx: dict[str, list[str]] = {}
+room_ctx: dict[str, list[dict]] = {}
 room_last_active: dict[str, float] = {}
 utterance_state: dict[str, dict] = {}
 utterance_locks: dict[str, asyncio.Lock] = {}
+utterance_rev: dict[str, int] = {}
 MAX_CTX = 6
+
+
+def format_ctx(buf: list[dict]) -> str:
+    if not buf:
+        return ""
+    lines = [f"{e['spk']}: {e['text']}" for e in buf]
+    return "Recent conversation:\n" + "\n".join(lines) + "\n\n"
+
+
+def upsert_ctx_entry(buf: list[dict], uid: str, spk: str, text: str) -> None:
+    for entry in buf:
+        if entry["uid"] == uid:
+            entry["text"] = text
+            return
+    buf.append({"uid": uid, "spk": spk, "text": text})
+    if len(buf) > MAX_CTX:
+        buf.pop(0)
 
 def touch_room(room_id: str) -> None:
     room_last_active[room_id] = time.time()
@@ -249,9 +267,7 @@ async def handle_translate(
         )
 
     ctx_buf = room_ctx.get(room_id, [])
-    ctx = ""
-    if ctx_buf:
-        ctx = "Recent conversation:\n" + "\n".join(ctx_buf) + "\n\n"
+    ctx = format_ctx(ctx_buf)
 
     key = utterance_key(room_id, uid)
     lock = utterance_locks.setdefault(key, asyncio.Lock())
@@ -261,10 +277,12 @@ async def handle_translate(
             key,
             {"src": "", "tgt": "", "src_lang": use_src, "tgt_lang": target},
         )
+        state["_rev"] = utterance_rev.get(key, 0)
         state["src"] += text
         state["src_lang"] = use_src
         state["tgt_lang"] = target
         full_src = state["src"]
+        rev = state["_rev"]
 
         try:
             for piece in split_text(text):
@@ -279,6 +297,8 @@ async def handle_translate(
                     max_tokens=API_MAX_TOKENS,
                 )
                 async for chunk in stream:
+                    if state.get("_rev") != utterance_rev.get(key, 0):
+                        return
                     t = chunk.choices[0].delta.content
                     if not t:
                         continue
@@ -302,6 +322,8 @@ async def handle_translate(
             return
 
         if final:
+            if state.get("_rev") != utterance_rev.get(key, 0):
+                return
             await broadcast(room_id, json.dumps({
                 "type": "t_done",
                 "full": state["tgt"],
@@ -313,20 +335,127 @@ async def handle_translate(
                 "tgt_lang": target,
             }, ensure_ascii=False))
 
-            ctx_buf.append(f"{spk}: {full_src}")
-            if len(ctx_buf) > MAX_CTX:
-                ctx_buf.pop(0)
+            upsert_ctx_entry(ctx_buf, uid, spk, full_src)
 
-            await db.insert_message(
-                room_id, uid, spk, full_src, state["tgt"],
-                use_src, target, final,
+            updated = await db.update_message_by_uid(
+                room_id, uid, full_src, state["tgt"], use_src, target,
             )
+            if not updated:
+                await db.insert_message(
+                    room_id, uid, spk, full_src, state["tgt"],
+                    use_src, target, final,
+                )
             utterance_state.pop(key, None)
             utterance_locks.pop(key, None)
             logger.info(
                 "translate done | room=%s uid=%s src_len=%d tgt_len=%d",
                 room_id, uid, len(full_src), len(state["tgt"]),
             )
+
+async def handle_retranslate(
+    ws: WebSocket,
+    room_id: str,
+    text: str,
+    target: str,
+    source: str,
+    uid: str,
+    spk: str,
+) -> None:
+    detected_src = detect_lang(text)
+    use_src = detected_src if source in ("auto", "?") else source
+    if target == "auto":
+        prompt = AUTO_PROMPT
+    else:
+        lang = LANG_MAP.get(target, target)
+        prompt = STREAM_PROMPT.format(lang=lang)
+
+    logger.info(
+        "retranslate | room=%s uid=%s spk=%s src_len=%d",
+        room_id, uid, spk, len(text),
+    )
+
+    ctx_buf = room_ctx.get(room_id, [])
+    upsert_ctx_entry(ctx_buf, uid, spk, text)
+    ctx = format_ctx(ctx_buf)
+
+    key = utterance_key(room_id, uid)
+    utterance_rev[key] = utterance_rev.get(key, 0) + 1
+    utterance_state.pop(key, None)
+    lock = utterance_locks.setdefault(key, asyncio.Lock())
+
+    async with lock:
+        state = {
+            "src": text,
+            "tgt": "",
+            "src_lang": use_src,
+            "tgt_lang": target,
+        }
+        utterance_state[key] = state
+        full_src = text
+
+        try:
+            for piece in split_text(text):
+                stream = await client.chat.completions.create(
+                    model=API_MODEL,
+                    messages=[
+                        {"role": "system", "content": ctx + prompt},
+                        {"role": "user", "content": piece},
+                    ],
+                    stream=True,
+                    temperature=API_TEMPERATURE,
+                    max_tokens=API_MAX_TOKENS,
+                )
+                async for chunk in stream:
+                    t = chunk.choices[0].delta.content
+                    if not t:
+                        continue
+                    state["tgt"] += t
+                    await broadcast(room_id, json.dumps({
+                        "type": "t_chunk",
+                        "text": t,
+                        "acc": state["tgt"],
+                        "uid": uid,
+                        "final": True,
+                        "revised": True,
+                        "spk": spk,
+                        "src": full_src,
+                        "src_lang": use_src,
+                        "tgt_lang": target,
+                    }, ensure_ascii=False))
+        except Exception as e:
+            logger.error("API error (retranslate): %s", e)
+            await send_to(ws, json.dumps({
+                "type": "error", "message": str(e), "uid": uid,
+            }))
+            return
+        finally:
+            utterance_state.pop(key, None)
+            utterance_locks.pop(key, None)
+
+        await broadcast(room_id, json.dumps({
+            "type": "t_done",
+            "full": state["tgt"],
+            "uid": uid,
+            "final": True,
+            "revised": True,
+            "spk": spk,
+            "src": full_src,
+            "src_lang": use_src,
+            "tgt_lang": target,
+        }, ensure_ascii=False))
+
+        updated = await db.update_message_by_uid(
+            room_id, uid, full_src, state["tgt"], use_src, target,
+        )
+        if not updated:
+            await db.insert_message(
+                room_id, uid, spk, full_src, state["tgt"],
+                use_src, target, True,
+            )
+        logger.info(
+            "retranslate done | room=%s uid=%s src_len=%d tgt_len=%d",
+            room_id, uid, len(full_src), len(state["tgt"]),
+        )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -427,10 +556,11 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
                     }))
                 continue
 
-            if msg.get("type") != "translate":
-                continue
-
             touch_room(room_id)
+
+            msg_type = msg.get("type")
+            if msg_type not in ("translate", "retranslate"):
+                continue
 
             text = msg["text"]
             target = msg["target_lang"]
@@ -445,9 +575,14 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
                 }))
                 continue
 
-            await handle_translate(
-                ws, room_id, text, target, source, uid, spk, final,
-            )
+            if msg_type == "retranslate":
+                await handle_retranslate(
+                    ws, room_id, text, target, source, uid, spk,
+                )
+            else:
+                await handle_translate(
+                    ws, room_id, text, target, source, uid, spk, final,
+                )
 
     except WebSocketDisconnect:
         pass
