@@ -43,7 +43,7 @@ body {
   color: var(--text);
 }
 .brand-mark { width: 32px; height: 32px; flex-shrink: 0; }
-.brand-name { color: var(--accent); }
+.brand-name { color: var(--accent-fg); }
 
 .hero {
   text-align: center;
@@ -82,7 +82,8 @@ body {
   font-weight: 800;
   letter-spacing: 0.04em;
   margin-bottom: 12px;
-  background: linear-gradient(135deg, var(--brand-glaze), var(--accent));
+  color: var(--text);
+  background: linear-gradient(135deg, var(--title-from), var(--title-to));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -201,7 +202,7 @@ body {
   font-size: 12px;
   color: var(--text-dim);
 }
-.landing-footer .brand-inline { color: var(--accent); font-weight: 600; }
+.landing-footer .brand-inline { color: var(--accent-fg); font-weight: 600; }
 
 /* ---- chat shell ---- */
 #chat {
@@ -245,7 +246,7 @@ header {
 }
 .chat-logo:hover { opacity: 0.75; }
 .chat-logo-mark { width: 20px; height: 20px; flex-shrink: 0; }
-.chat-logo-name { color: var(--accent); }
+.chat-logo-name { color: var(--accent-fg); }
 
 .header-center {
   flex: 1;
@@ -402,12 +403,13 @@ header {
 }
 .btn-record {
   background: var(--record);
-  color: var(--btn-on);
+  color: var(--record-fg);
   border-color: var(--record);
 }
 .btn-record:hover { background: var(--record-hover); }
 .btn-record.idle {
   background: var(--live);
+  color: var(--live-fg);
   border-color: var(--live);
 }
 .btn-record.idle:hover { filter: brightness(1.08); }
@@ -552,7 +554,7 @@ header {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   min-width: 0;
 }
 .entry .spk-dot {
@@ -802,7 +804,7 @@ header {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.14em;
-  color: var(--accent);
+  color: var(--accent-fg);
   margin-bottom: 16px;
 }
 .qr-wrap {
