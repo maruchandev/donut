@@ -1,0 +1,15 @@
+[Unit]
+Description=Cloudflare Named Tunnel for donut
+After=network-online.target donut.service
+Requires=donut.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+ExecStart=/usr/local/bin/cloudflared tunnel --config /home/ubuntu/.cloudflared/config.yml run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

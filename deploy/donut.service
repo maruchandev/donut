@@ -1,0 +1,20 @@
+[Unit]
+Description=どーなつ stream-translator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/donut/server
+EnvironmentFile=-/home/ubuntu/donut/server/.env
+Environment=RELOAD=false
+Environment=HOST=127.0.0.1
+Environment=PORT=8765
+ExecStart=/home/ubuntu/donut/server/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
