@@ -1,29 +1,31 @@
-/* どーなつ — shared design tokens */
+/* どーなつ — shared design tokens (warm café slate) */
 :root {
-  --bg: #0e0d0b;
-  --bg-subtle: #12100e;
-  --surface: #181614;
-  --surface-2: #201e1a;
-  --surface-3: #282420;
-  --border: #2e2a24;
-  --border-strong: #3d362e;
-  --text: #f5f0e8;
-  --text-muted: #a89d8f;
-  --text-dim: #6b6258;
-  --accent: #d9852f;
-  --accent-hover: #e89942;
-  --accent-soft: #d9852f1f;
-  --accent-glow: #d9852f33;
-  --brand-glaze: #e4ad6a;
-  --brand-pink: #c96d8a;
-  --ja: #5a94c6;
-  --ko: #c96d8a;
-  --live: #4a9a5c;
-  --live-soft: #4a9a5c22;
-  --record: #c45454;
-  --record-hover: #b24848;
-  --record-soft: #c4545422;
-  --error: #c45454;
+  --bg: #15171c;
+  --bg-subtle: #1a1d23;
+  --surface: #22262e;
+  --surface-2: #2a2f38;
+  --surface-3: #323843;
+  --border: #3a404c;
+  --border-strong: #4a5260;
+  --text: #eceae6;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+  --accent: #c8956c;
+  --accent-hover: #d4a67a;
+  --accent-soft: #c8956c22;
+  --accent-glow: #c8956c30;
+  --brand-glaze: #e8d4b8;
+  --brand-icing: #9bb8c8;
+  --ja: #7aa8c8;
+  --ko: #7eb8a8;
+  --live: #5cb87a;
+  --live-soft: #5cb87a22;
+  --record: #c07070;
+  --record-hover: #b06060;
+  --record-soft: #c0707022;
+  --error: #c07070;
+  --off: #6b7280;
+  --off-soft: #6b728022;
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 14px;
@@ -111,7 +113,7 @@ button, input, select, textarea {
   flex-shrink: 0;
 }
 .dot.on { background: var(--live); box-shadow: 0 0 0 3px var(--live-soft); }
-.dot.off { background: var(--record); box-shadow: 0 0 0 3px var(--record-soft); }
+.dot.off { background: var(--off); box-shadow: 0 0 0 3px var(--off-soft); }
 
 /* Room code inputs */
 .room-digit {
