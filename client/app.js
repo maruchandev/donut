@@ -20,7 +20,10 @@ let historyExhausted = false;
 let historyLoaded = false;
 let scrollTimer = null;
 
-const SPEECH_FLUSH_MS = 2500;
+const SPEECH_FLUSH_MAX_MS = 2500;
+const SPEECH_FLUSH_MIN_MS = 600;
+const SPEECH_ADAPT_CHARS = 120;
+const SPEECH_FORCE_CHUNK_CHARS = 60;
 const SENTENCE_END_RE = /[。！？.!?\n]/;
 
 let speechCommitted = '';
@@ -1010,15 +1013,53 @@ function getSpeechRemainder() {
   return getSpeechFull().slice(speechSentLen);
 }
 
+function getAdaptiveFlushMs(unsentLen) {
+  if (unsentLen <= 0) return SPEECH_FLUSH_MAX_MS;
+  var ratio = Math.min(1, unsentLen / SPEECH_ADAPT_CHARS);
+  return Math.round(SPEECH_FLUSH_MAX_MS - ratio * (SPEECH_FLUSH_MAX_MS - SPEECH_FLUSH_MIN_MS));
+}
+
+function clearSpeechFlushTimer() {
+  if (speechFlushTimer) {
+    clearTimeout(speechFlushTimer);
+    speechFlushTimer = null;
+  }
+}
+
+function scheduleSpeechFlush() {
+  clearSpeechFlushTimer();
+  if (!isRecording) return;
+  var unsent = getSpeechRemainder();
+  if (!unsent.trim()) return;
+  var delay = getAdaptiveFlushMs(unsent.length);
+  speechFlushTimer = setTimeout(function() {
+    speechFlushTimer = null;
+    if (!isRecording) return;
+    flushSpeechOnSilence();
+    scheduleSpeechFlush();
+  }, delay);
+}
+
+function flushSpeechOnSilence() {
+  var unsent = getSpeechRemainder();
+  if (!unsent.trim()) return;
+
+  flushSpeech(false);
+
+  var still = getSpeechRemainder().trim();
+  if (still.length >= SPEECH_FORCE_CHUNK_CHARS) {
+    sendSpeechSentence(still);
+    speechSentLen = getSpeechFull().length;
+    updateSpeechPreview();
+  }
+}
+
 function resetSpeechState() {
   speechCommitted = '';
   speechInterim = '';
   speechSentLen = 0;
   speechResultLen = 0;
-  if (speechFlushTimer) {
-    clearInterval(speechFlushTimer);
-    speechFlushTimer = null;
-  }
+  clearSpeechFlushTimer();
 }
 
 function rebuildSpeechFromResults(results) {
@@ -1112,6 +1153,7 @@ function flushSpeech(forceFinal) {
   if (split.consumed > 0) {
     speechSentLen += split.consumed;
     updateSpeechPreview();
+    if (!forceFinal) scheduleSpeechFlush();
   }
 
   if (forceFinal) {
@@ -1121,6 +1163,7 @@ function flushSpeech(forceFinal) {
     speechInterim = '';
     speechSentLen = 0;
     clearLocalInterim();
+    clearSpeechFlushTimer();
   }
 }
 
@@ -1154,6 +1197,7 @@ function startRecording() {
       }
     }
     flushSpeech(hadFinal);
+    if (!hadFinal) scheduleSpeechFlush();
   };
 
   recognition.onerror = function(event) {
@@ -1167,10 +1211,6 @@ function startRecording() {
       try { recognition.start(); } catch(e) {}
     }
   };
-
-  speechFlushTimer = setInterval(function() {
-    if (isRecording) flushSpeech(false);
-  }, SPEECH_FLUSH_MS);
 
   recognition.start();
   isRecording = true;

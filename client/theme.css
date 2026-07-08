@@ -151,7 +151,7 @@ button, input, select, textarea {
   border-radius: var(--radius-lg);
   padding: 6px;
   box-shadow: var(--shadow-md);
-  z-index: 50;
+  z-index: 100;
 }
 .menu-drop.hidden { display: none; }
 
