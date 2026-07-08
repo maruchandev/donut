@@ -1024,6 +1024,16 @@ function resizeTextarea() {
   textInput.style.height = Math.min(textInput.scrollHeight, 120) + 'px';
 }
 
+function insertNewlineAtCursor(el) {
+  var start = el.selectionStart;
+  var end = el.selectionEnd;
+  var value = el.value;
+  el.value = value.slice(0, start) + '\n' + value.slice(end);
+  var pos = start + 1;
+  el.selectionStart = pos;
+  el.selectionEnd = pos;
+}
+
 /* ---- recording ---- */
 
 function getSpeechFull() {
@@ -1493,7 +1503,10 @@ sendBtn.addEventListener('click', sendText);
 textInput.addEventListener('input', resizeTextarea);
 
 textInput.addEventListener('keydown', function(e) {
-  if (e.key === 'Enter' && e.ctrlKey) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    insertNewlineAtCursor(this);
+    resizeTextarea();
     return;
   }
   if (e.key === 'Enter' && !e.shiftKey) {
