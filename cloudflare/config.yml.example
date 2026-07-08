@@ -1,0 +1,24 @@
+# Named Cloudflare Tunnel (custom domain)
+#
+# Setup:
+#   1. cloudflared tunnel login
+#   2. cloudflared tunnel create donut-translator
+#   3. Copy credentials JSON to ~/.cloudflared/<TUNNEL-ID>.json
+#   4. cloudflared tunnel route dns donut-translator donut.example.com
+#   5. cp config.yml.example ~/.cloudflared/config.yml
+#      Edit tunnel ID and hostname below.
+#
+# Run:
+#   cloudflared tunnel run donut-translator
+
+tunnel: <TUNNEL-ID>
+credentials-file: /home/user/.cloudflared/<TUNNEL-ID>.json
+
+ingress:
+  - hostname: donut.example.com
+    service: http://127.0.0.1:8765
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: false
+      httpHostHeader: donut.example.com
+  - service: http_status:404

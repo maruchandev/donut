@@ -164,6 +164,30 @@ body {
   border-color: var(--text-dim);
 }
 .btn-new-room:disabled { opacity: 0.5; cursor: default; }
+.lobby-create-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.create-password-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: left;
+}
+.create-password-input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-size: 14px;
+}
+.create-password-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .lobby-error {
   color: var(--error);
   font-size: 13px;

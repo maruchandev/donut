@@ -49,8 +49,12 @@
           </div>
           <button id="joinBtn" type="button">入室</button>
         </div>
-        <div class="lobby-divider">or</div>
-        <button class="btn-new-room" id="newRoomBtn">新しいルームを作成</button>
+        <div class="lobby-divider hidden" id="lobbyDivider">or</div>
+        <div class="lobby-create-wrap hidden" id="createWrap">
+          <label class="create-password-label" for="createPassword" id="createPasswordLabel">発行パスワード</label>
+          <input type="password" id="createPassword" class="create-password-input" autocomplete="off" maxlength="128">
+          <button class="btn-new-room" id="newRoomBtn">新しいルームを作成</button>
+        </div>
         <p class="lobby-error" id="lobbyError"></p>
       </div>
     </section>

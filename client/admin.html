@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja" translate="no" class="notranslate">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0e0d0b">
+<title>どーなつ — 管理</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="theme.css?v=2">
+<link rel="stylesheet" href="admin.css?v=2">
+</head>
+<body>
+
+<div id="loginView" class="view">
+  <div class="panel login-panel">
+    <h1>管理画面</h1>
+    <p class="sub">許可された管理者証明書（.pem / .crt）をアップロードしてログインしてください</p>
+    <form id="loginForm" autocomplete="off">
+      <label class="field-label" for="adminCert">管理者証明書</label>
+      <input type="file" id="adminCert" class="field-file" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert" required>
+      <p class="error" id="loginError" hidden></p>
+      <button type="submit" class="btn-primary" id="loginBtn">証明書でログイン</button>
+    </form>
+    <p class="hint" id="loginHint" hidden>許可された管理者証明書が未設定です。.env の ADMIN_CERT_FINGERPRINTS を設定するか、既存の管理者に登録を依頼してください。</p>
+  </div>
+</div>
+
+<div id="adminView" class="view hidden">
+  <header class="admin-header">
+    <div>
+      <h1>ルーム発行管理</h1>
+      <p class="sub">発行ポリシーと発行パスワードを管理します</p>
+    </div>
+    <button type="button" class="btn-secondary" id="logoutBtn">ログアウト</button>
+  </header>
+
+  <section class="panel">
+    <h2>発行ポリシー</h2>
+    <div class="mode-options" id="modeOptions">
+      <label class="mode-option">
+        <input type="radio" name="roomMode" value="open">
+        <span class="mode-card">
+          <strong>誰でも発行可</strong>
+          <span>ログイン不要でルームを作成できます</span>
+        </span>
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="roomMode" value="closed">
+        <span class="mode-card">
+          <strong>発行不可</strong>
+          <span>一般ユーザーはルームを作成できません</span>
+        </span>
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="roomMode" value="password">
+        <span class="mode-card">
+          <strong>パスワード発行</strong>
+          <span>有効な発行パスワードを入力した人のみ作成できます</span>
+        </span>
+      </label>
+    </div>
+    <p class="status-msg" id="settingsStatus" hidden></p>
+  </section>
+
+  <section class="panel" id="passwordSection">
+    <div class="panel-head">
+      <div>
+        <h2>発行パスワード</h2>
+        <p class="sub">発行したパスワードはこの画面でのみ表示されます（再表示不可）</p>
+      </div>
+      <button type="button" class="btn-primary" id="issueBtn">パスワードを発行</button>
+    </div>
+
+    <div class="issue-form hidden" id="issueForm">
+      <label class="field-label" for="issueLabel">メモ（任意）</label>
+      <input type="text" id="issueLabel" class="field-input" maxlength="64" placeholder="例: イベントA用">
+      <div class="issue-actions">
+        <button type="button" class="btn-primary" id="issueConfirmBtn">発行する</button>
+        <button type="button" class="btn-secondary" id="issueCancelBtn">キャンセル</button>
+      </div>
+    </div>
+
+    <div class="issued-once hidden" id="issuedOnce">
+      <p class="issued-label">発行したパスワード（コピーして配布してください）</p>
+      <div class="issued-value">
+        <code id="issuedPassword"></code>
+        <button type="button" class="btn-secondary btn-sm" id="copyIssuedBtn">コピー</button>
+      </div>
+      <p class="hint">このパスワードは再表示できません。無効化するまで有効期限はありません。</p>
+    </div>
+
+    <div class="password-list-wrap">
+      <table class="password-table" id="passwordTable">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>メモ</th>
+            <th>状態</th>
+            <th>作成</th>
+            <th>最終使用</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="passwordList"></tbody>
+      </table>
+      <p class="empty" id="passwordEmpty" hidden>発行パスワードはまだありません</p>
+    </div>
+  </section>
+
+  <section class="panel" id="certSection">
+    <div class="panel-head">
+      <div>
+        <h2>管理者証明書</h2>
+        <p class="sub">ログインを許可する証明書の SHA-256 フィンガープリントを登録・管理します</p>
+      </div>
+      <button type="button" class="btn-primary" id="registerCertBtn">証明書を登録</button>
+    </div>
+
+    <div class="issue-form hidden" id="registerCertForm">
+      <label class="field-label" for="certLabel">メモ（任意）</label>
+      <input type="text" id="certLabel" class="field-input" maxlength="64" placeholder="例: 運用担当A">
+      <label class="field-label" for="certFile">証明書ファイル</label>
+      <input type="file" id="certFile" class="field-file" accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert">
+      <div class="issue-actions">
+        <button type="button" class="btn-primary" id="registerCertConfirmBtn">登録する</button>
+        <button type="button" class="btn-secondary" id="registerCertCancelBtn">キャンセル</button>
+      </div>
+    </div>
+
+    <div class="password-list-wrap">
+      <table class="password-table" id="certTable">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>メモ</th>
+            <th>Subject</th>
+            <th>フィンガープリント</th>
+            <th>状態</th>
+            <th>最終使用</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="certList"></tbody>
+      </table>
+      <p class="empty" id="certEmpty" hidden>登録済み証明書はありません（.env の ADMIN_CERT_FINGERPRINTS のみ有効な場合を含む）</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>管理者用ルーム作成</h2>
+    <p class="sub">ポリシーに関係なく、管理者としてルームを作成できます</p>
+    <button type="button" class="btn-primary" id="adminRoomBtn">ルームを作成</button>
+    <p class="status-msg" id="adminRoomStatus" hidden></p>
+  </section>
+</div>
+
+<script src="admin.js?v=2"></script>
+</body>
+</html>

@@ -41,6 +41,12 @@ const joinBtn = document.getElementById('joinBtn');
 const newRoomBtn = document.getElementById('newRoomBtn');
 const lobbyError = document.getElementById('lobbyError');
 const lobbySub = document.getElementById('lobbySub');
+const lobbyDivider = document.getElementById('lobbyDivider');
+const createWrap = document.getElementById('createWrap');
+const createPassword = document.getElementById('createPassword');
+const createPasswordLabel = document.getElementById('createPasswordLabel');
+
+let roomCreateMode = 'open';
 const roomBadge = document.getElementById('roomBadge');
 const roomBadgeLabel = document.getElementById('roomBadgeLabel');
 const roomBadgeNum = document.getElementById('roomBadgeNum');
@@ -106,6 +112,10 @@ var TXT = {
     invalidRoom: '6桁の数字を入力してください',
     roomNotFound: 'ルームが見つかりません',
     roomCreateFailed: 'ルームの作成に失敗しました',
+    roomCreateClosed: '現在、新しいルームは作成できません',
+    roomPasswordRequired: '発行パスワードを入力してください',
+    roomPasswordInvalid: '発行パスワードが正しくありません',
+    createPasswordLabel: '発行パスワード',
     roomLabel: 'ルーム',
     heroBadge: '会話も講演も',
     linkCopied: 'リンクをコピーしました',
@@ -151,6 +161,10 @@ var TXT = {
     invalidRoom: '6자리 숫자를 입력해주세요',
     roomNotFound: '룸을 찾을 수 없습니다',
     roomCreateFailed: '룸 생성에 실패했습니다',
+    roomCreateClosed: '현재 새 룸을 만들 수 없습니다',
+    roomPasswordRequired: '발행 비밀번호를 입력해주세요',
+    roomPasswordInvalid: '발행 비밀번호가 올바르지 않습니다',
+    createPasswordLabel: '발행 비밀번호',
     roomLabel: '룸',
     heroBadge: '대화부터 강연까지',
     linkCopied: '링크를 복사했습니다',
@@ -196,6 +210,10 @@ var TXT = {
     invalidRoom: 'Enter a 6-digit number',
     roomNotFound: 'Room not found',
     roomCreateFailed: 'Failed to create room',
+    roomCreateClosed: 'New rooms cannot be created right now',
+    roomPasswordRequired: 'Enter an issue password',
+    roomPasswordInvalid: 'Invalid issue password',
+    createPasswordLabel: 'Issue password',
     roomLabel: 'Room',
     heroBadge: 'Chat to conference',
     linkCopied: 'Link copied',
@@ -286,6 +304,8 @@ function applyUI() {
   lobbySub.textContent = t.lobbySub;
   joinBtn.textContent = t.join;
   newRoomBtn.textContent = t.newRoom;
+  if (createPasswordLabel) createPasswordLabel.textContent = t.createPasswordLabel;
+  applyRoomCreatePolicy();
   if (screenLink) screenLink.textContent = t.screen;
   dissolveBtn.textContent = t.dissolve;
   dissolveBtn.title = t.dissolveConfirm;
@@ -609,6 +629,7 @@ function showLobby(errMsg) {
   updateRoomUrl('');
   lobbyEl.classList.remove('hidden');
   lobbyEl.scrollTop = 0;
+  fetchRoomPolicy();
   chatEl.classList.remove('open');
   clearRoomCode();
   lobbyError.textContent = errMsg || '';
@@ -1276,6 +1297,63 @@ function sendText() {
   textInput.focus();
 }
 
+/* ---- room create policy ---- */
+
+function applyRoomCreatePolicy() {
+  if (!createWrap || !lobbyDivider) return;
+  if (roomCreateMode === 'closed') {
+    createWrap.classList.add('hidden');
+    lobbyDivider.classList.add('hidden');
+    return;
+  }
+  createWrap.classList.remove('hidden');
+  lobbyDivider.classList.remove('hidden');
+  var needsPassword = roomCreateMode === 'password';
+  if (createPassword) {
+    createPassword.classList.toggle('hidden', !needsPassword);
+    if (!needsPassword) createPassword.value = '';
+  }
+  if (createPasswordLabel) {
+    createPasswordLabel.classList.toggle('hidden', !needsPassword);
+  }
+}
+
+function fetchRoomPolicy() {
+  return fetch('/api/room-policy').then(function(r) {
+    if (!r.ok) return { mode: 'open' };
+    return r.json();
+  }).then(function(data) {
+    roomCreateMode = data.mode || 'open';
+    applyRoomCreatePolicy();
+  }).catch(function() {
+    roomCreateMode = 'open';
+    applyRoomCreatePolicy();
+  });
+}
+
+function roomCreateErrorMessage(data) {
+  var detail = data && data.detail;
+  var code = detail && detail.code;
+  var t = TXT[UI];
+  if (code === 'room_creation_closed') return t.roomCreateClosed;
+  if (code === 'room_password_required') return t.roomPasswordRequired;
+  if (code === 'room_password_invalid') return t.roomPasswordInvalid;
+  if (detail && detail.message) return detail.message;
+  if (typeof detail === 'string') return detail;
+  return t.roomCreateFailed;
+}
+
+function parseRoomCreateResponse(r) {
+  return r.json().then(function(data) {
+    if (!r.ok) {
+      var err = new Error(roomCreateErrorMessage(data));
+      err.data = data;
+      throw err;
+    }
+    return data;
+  });
+}
+
 /* ---- lobby events ---- */
 
 function joinRoom(val) {
@@ -1300,13 +1378,25 @@ function joinRoom(val) {
 
 newRoomBtn.addEventListener('click', function() {
   lobbyError.textContent = '';
+  if (roomCreateMode === 'password') {
+    if (!createPassword || !createPassword.value.trim()) {
+      lobbyError.textContent = TXT[UI].roomPasswordRequired;
+      return;
+    }
+  }
   newRoomBtn.disabled = true;
   newRoomBtn.textContent = '...';
-  fetch('/room', { method: 'POST' }).then(function(r) {
-    if (!r.ok) throw new Error(TXT[UI].roomCreateFailed);
-    return r.json();
-  }).then(function(data) {
+  var body = null;
+  if (roomCreateMode === 'password' && createPassword) {
+    body = JSON.stringify({ password: createPassword.value.trim() });
+  }
+  fetch('/room', {
+    method: 'POST',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body,
+  }).then(parseRoomCreateResponse).then(function(data) {
     if (!data || !data.room) throw new Error(TXT[UI].roomCreateFailed);
+    if (createPassword) createPassword.value = '';
     showChat(data.room, { showQr: true });
   }).catch(function(err) {
     lobbyError.textContent = TXT[UI].errPrefix + ': ' + (err.message || TXT[UI].roomCreateFailed);
@@ -1426,6 +1516,7 @@ logEl.addEventListener('scroll', function() {
 });
 
 applyUI();
+fetchRoomPolicy();
 myLang.value = UI === 'ko' ? 'ko' : 'ja';
 dirHint.textContent = TXT[UI].dir[myLang.value];
 setStatus(TXT[UI].ready);

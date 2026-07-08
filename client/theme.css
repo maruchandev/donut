@@ -37,6 +37,8 @@
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
+.hidden { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {

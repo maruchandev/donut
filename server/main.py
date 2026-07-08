@@ -9,13 +9,30 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from pydantic import BaseModel, Field
 
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 
+import aiosqlite
+
+import auth
 import db
 from chunking import split_text
 
@@ -31,6 +48,21 @@ API_MAX_TOKENS = int(os.getenv("API_MAX_TOKENS", "512"))
 ORIGINS = os.getenv("ORIGINS", "*")
 ROOM_IDLE_SECS = int(os.getenv("ROOM_IDLE_SECS", "3600"))
 ROOM_CLEANUP_INTERVAL = int(os.getenv("ROOM_CLEANUP_INTERVAL", "60"))
+
+class RoomCreateBody(BaseModel):
+    password: str | None = Field(default=None, max_length=128)
+
+class AdminSettingsBody(BaseModel):
+    room_create_mode: str = Field(pattern=r"^(open|closed|password)$")
+
+class IssuePasswordBody(BaseModel):
+    label: str = Field(default="", max_length=64)
+
+class IssuePasswordPatchBody(BaseModel):
+    enabled: bool
+
+class AdminCertPatchBody(BaseModel):
+    enabled: bool
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -197,6 +229,89 @@ def gen_room_code() -> str:
         code = f"{random.randint(0, 999999):06d}"
         if code not in rooms:
             return code
+
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+async def admin_is_configured() -> bool:
+    return auth.env_admin_configured() or await db.has_enabled_admin_certificates()
+
+
+async def authorize_admin_certificate(fingerprint: str) -> bool:
+    allowed = auth.env_cert_fingerprints() | await db.get_enabled_admin_fingerprints()
+    return fingerprint in allowed
+
+
+async def require_admin(
+    admin_session: str | None = Cookie(None, alias=auth.SESSION_COOKIE),
+) -> str:
+    if not await admin_is_configured():
+        raise HTTPException(status_code=503, detail="Admin is not configured")
+    if not auth.validate_admin_session(admin_session):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return admin_session
+
+async def authorize_room_creation(
+    request: Request,
+    body: RoomCreateBody | None,
+    *,
+    admin_bypass: bool = False,
+) -> None:
+    if admin_bypass:
+        return
+
+    mode = await db.get_room_create_mode()
+    if mode == "open":
+        return
+
+    if mode == "closed":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "room_creation_closed", "message": "Room creation is disabled"},
+        )
+
+    password = (body.password if body else None) or ""
+    password = password.strip()
+    if not password:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "room_password_required", "message": "Issue password required"},
+        )
+
+    ip = client_ip(request)
+    rate_key = f"room_pw:{ip}"
+    if not auth.rate_limit_allowed(
+        rate_key, auth.ROOM_PW_MAX_ATTEMPTS, auth.ROOM_PW_WINDOW_SECS,
+    ):
+        raise HTTPException(status_code=429, detail="Too many attempts")
+
+    matched_id = None
+    for pw_id, stored_hash in await db.get_enabled_room_password_hashes():
+        if auth.verify_password(password, stored_hash):
+            matched_id = pw_id
+            break
+
+    if matched_id is None:
+        auth.record_failed_attempt(rate_key)
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "room_password_invalid", "message": "Invalid issue password"},
+        )
+
+    await db.touch_room_password(matched_id)
+
+def _create_room_record() -> str:
+    code = gen_room_code()
+    rooms[code] = set()
+    room_ctx[code] = []
+    touch_room(code)
+    logger.info("Room created: %s", code)
+    return code
 
 def pick_name(ws: WebSocket, room_id: str, lang: str) -> str:
     pool = JP_NAMES if lang == "ja" else KR_NAMES
@@ -487,14 +602,186 @@ async def health():
 async def screen_page():
     return RedirectResponse(url="/screen.html", status_code=302)
 
+@app.get("/admin")
+async def admin_page():
+    return RedirectResponse(url="/admin.html", status_code=302)
+
+@app.get("/api/room-policy")
+async def room_policy():
+    return {"mode": await db.get_room_create_mode()}
+
 @app.post("/room")
-async def create_room():
-    code = gen_room_code()
-    rooms[code] = set()
-    room_ctx[code] = []
-    touch_room(code)
-    logger.info("Room created: %s", code)
-    return {"room": code}
+async def create_room(request: Request, body: RoomCreateBody | None = None):
+    await authorize_room_creation(request, body)
+    return {"room": _create_room_record()}
+
+@app.post("/api/admin/login")
+async def admin_login(
+    request: Request,
+    response: Response,
+    certificate: UploadFile = File(...),
+):
+    if not await admin_is_configured():
+        raise HTTPException(status_code=503, detail="Admin is not configured")
+
+    ip = client_ip(request)
+    rate_key = f"admin_login:{ip}"
+    if not auth.rate_limit_allowed(
+        rate_key, auth.LOGIN_MAX_ATTEMPTS, auth.LOGIN_WINDOW_SECS,
+    ):
+        raise HTTPException(status_code=429, detail="Too many login attempts")
+
+    data = await certificate.read(auth.MAX_CERT_BYTES + 1)
+    if len(data) > auth.MAX_CERT_BYTES:
+        raise HTTPException(status_code=400, detail="Certificate file is too large")
+
+    try:
+        parsed = auth.parse_certificate_bytes(data)
+    except ValueError as exc:
+        auth.record_failed_attempt(rate_key)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not await authorize_admin_certificate(parsed.fingerprint):
+        auth.record_failed_attempt(rate_key)
+        raise HTTPException(status_code=401, detail="Certificate is not authorized")
+
+    await db.touch_admin_certificate(parsed.fingerprint)
+    token = auth.create_admin_session()
+    response.set_cookie(
+        auth.SESSION_COOKIE,
+        token,
+        **auth.cookie_flags(request.url.scheme),
+    )
+    logger.info("Admin login fingerprint=%s subject=%r", parsed.fingerprint[:12], parsed.subject)
+    return {"ok": True}
+
+@app.post("/api/admin/logout")
+async def admin_logout(
+    response: Response,
+    request: Request,
+    admin_session: str = Depends(require_admin),
+):
+    auth.revoke_admin_session(admin_session)
+    flags = auth.cookie_flags(request.url.scheme)
+    response.delete_cookie(
+        auth.SESSION_COOKIE,
+        path="/",
+        secure=flags.get("secure", False),
+        httponly=flags.get("httponly", True),
+        samesite=flags.get("samesite", "strict"),
+    )
+    return {"ok": True}
+
+@app.get("/api/admin/session")
+async def admin_session(admin_session: str | None = Cookie(None, alias=auth.SESSION_COOKIE)):
+    configured = await admin_is_configured()
+    return {
+        "authenticated": configured and auth.validate_admin_session(admin_session),
+        "configured": configured,
+    }
+
+@app.get("/api/admin/settings")
+async def admin_get_settings(_: str = Depends(require_admin)):
+    return {"room_create_mode": await db.get_room_create_mode()}
+
+@app.put("/api/admin/settings")
+async def admin_put_settings(
+    body: AdminSettingsBody,
+    _: str = Depends(require_admin),
+):
+    await db.set_room_create_mode(body.room_create_mode)
+    logger.info("Room create mode set to %s", body.room_create_mode)
+    return {"room_create_mode": body.room_create_mode}
+
+@app.get("/api/admin/passwords")
+async def admin_list_passwords(_: str = Depends(require_admin)):
+    return {"passwords": await db.list_room_passwords()}
+
+@app.post("/api/admin/passwords")
+async def admin_create_password(
+    body: IssuePasswordBody,
+    _: str = Depends(require_admin),
+):
+    plain = auth.generate_issue_password()
+    pw_id = await db.insert_room_password(body.label, auth.hash_password(plain))
+    logger.info("Issue password created id=%d label=%r", pw_id, body.label.strip()[:64])
+    return {
+        "id": pw_id,
+        "password": plain,
+        "label": body.label.strip()[:64],
+    }
+
+@app.patch("/api/admin/passwords/{password_id}")
+async def admin_patch_password(
+    password_id: int,
+    body: IssuePasswordPatchBody,
+    _: str = Depends(require_admin),
+):
+    updated = await db.set_room_password_enabled(password_id, body.enabled)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Password not found")
+    logger.info("Issue password id=%d enabled=%s", password_id, body.enabled)
+    return {"id": password_id, "enabled": body.enabled}
+
+@app.get("/api/admin/certificates")
+async def admin_list_certificates(_: str = Depends(require_admin)):
+    return {"certificates": await db.list_admin_certificates()}
+
+
+@app.post("/api/admin/certificates")
+async def admin_register_certificate(
+    certificate: UploadFile = File(...),
+    label: str = Form(""),
+    _: str = Depends(require_admin),
+):
+    data = await certificate.read(auth.MAX_CERT_BYTES + 1)
+    if len(data) > auth.MAX_CERT_BYTES:
+        raise HTTPException(status_code=400, detail="Certificate file is too large")
+
+    try:
+        parsed = auth.parse_certificate_bytes(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        cert_id = await db.insert_admin_certificate(
+            parsed.fingerprint,
+            label,
+            parsed.subject,
+        )
+    except aiosqlite.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Certificate already registered") from exc
+
+    logger.info(
+        "Admin certificate registered id=%d fingerprint=%s",
+        cert_id,
+        parsed.fingerprint[:12],
+    )
+    return {
+        "id": cert_id,
+        "fingerprint": parsed.fingerprint,
+        "label": label.strip()[:64],
+        "subject": parsed.subject,
+        "enabled": True,
+    }
+
+
+@app.patch("/api/admin/certificates/{cert_id}")
+async def admin_patch_certificate(
+    cert_id: int,
+    body: AdminCertPatchBody,
+    _: str = Depends(require_admin),
+):
+    updated = await db.set_admin_certificate_enabled(cert_id, body.enabled)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    logger.info("Admin certificate id=%d enabled=%s", cert_id, body.enabled)
+    return {"id": cert_id, "enabled": body.enabled}
+
+
+@app.post("/api/admin/room")
+async def admin_create_room(_: str = Depends(require_admin)):
+    return {"room": _create_room_record()}
 
 @app.get("/room/{room_id}")
 async def room_exists(room_id: str):
