@@ -60,7 +60,7 @@ body {
   border: none;
   border-radius: var(--radius);
   background: var(--accent);
-  color: #fff;
+  color: var(--btn-on);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -88,7 +88,7 @@ body {
   align-items: center;
   gap: 12px;
   padding: 10px 20px;
-  background: rgba(34, 38, 46, 0.92);
+  background: var(--header-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
@@ -150,10 +150,10 @@ body {
 }
 .col-ja {
   border-right: 1px solid var(--border);
-  background: linear-gradient(180deg, #1a2228 0%, var(--bg) 100%);
+  background: linear-gradient(180deg, var(--col-ja-top) 0%, var(--bg) 100%);
 }
 .col-ko {
-  background: linear-gradient(180deg, #1a2420 0%, var(--bg) 100%);
+  background: linear-gradient(180deg, var(--col-ko-top) 0%, var(--bg) 100%);
 }
 
 .col-label {

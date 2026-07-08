@@ -128,7 +128,7 @@ body {
   font-weight: 600;
   cursor: pointer;
   background: var(--accent);
-  color: #fff;
+  color: var(--btn-on);
   transition: background 0.15s;
 }
 .lobby-join button:hover:not(:disabled) { background: var(--accent-hover); }
@@ -219,7 +219,7 @@ header {
   align-items: center;
   gap: 12px;
   padding: 10px 20px;
-  background: rgba(34, 38, 46, 0.92);
+  background: var(--header-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
@@ -402,7 +402,7 @@ header {
 }
 .btn-record {
   background: var(--record);
-  color: #fff;
+  color: var(--btn-on);
   border-color: var(--record);
 }
 .btn-record:hover { background: var(--record-hover); }
@@ -414,11 +414,11 @@ header {
 .btn-record:disabled { opacity: 0.4; cursor: default; }
 .btn-record.recording {
   animation: pulse 1.5s ease-in-out infinite;
-  box-shadow: 0 0 0 0 rgba(92, 184, 122, 0.35);
+  box-shadow: 0 0 0 0 rgba(var(--pulse-rgb), 0.35);
 }
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(92, 184, 122, 0.3); }
-  50% { box-shadow: 0 0 0 8px rgba(92, 184, 122, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--pulse-rgb), 0.3); }
+  50% { box-shadow: 0 0 0 8px rgba(var(--pulse-rgb), 0); }
 }
 
 .session-meta {
@@ -665,7 +665,7 @@ header {
 .entry .btn-edit-save {
   border: none;
   background: var(--accent);
-  color: #fff;
+  color: var(--btn-on);
 }
 .entry .btn-edit-save:hover { background: var(--accent-hover); }
 .entry .btn-edit-save:disabled { opacity: 0.45; cursor: default; }
@@ -723,7 +723,7 @@ header {
 }
 .btn-send {
   background: var(--accent);
-  color: #fff;
+  color: var(--btn-on);
   transition: background 0.15s;
 }
 .btn-send:hover { background: var(--accent-hover); }
@@ -761,7 +761,7 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.65);
+  background: var(--overlay-bg);
   backdrop-filter: blur(4px);
   padding: 20px;
 }
@@ -808,7 +808,7 @@ header {
 .qr-wrap {
   display: inline-flex;
   padding: 12px;
-  background: #fff;
+  background: var(--qr-bg);
   border-radius: var(--radius-lg);
   margin-bottom: 14px;
 }
@@ -844,14 +844,14 @@ header {
 .btn-qr-share {
   border: none;
   background: var(--accent);
-  color: #fff;
+  color: var(--btn-on);
 }
 .btn-qr-share:hover { background: var(--accent-hover); }
 .btn-qr-share.hidden { display: none; }
 .btn-qr-copy {
   border: none;
   background: var(--accent);
-  color: #fff;
+  color: var(--btn-on);
 }
 .btn-qr-copy:hover { background: var(--accent-hover); }
 .qr-actions.has-share .btn-qr-copy {
