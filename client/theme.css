@@ -1,112 +1,133 @@
-/* どーなつ — pastel design tokens + light/dark */
+/* どーなつ — design tokens
+   原則: パステルは背景・装飾用。文字は専用の --text / --brand / --ja / --ko を使う */
 
 :root,
 [data-theme="light"] {
   color-scheme: light;
-  --bg: #faf7f2;
-  --bg-subtle: #f5f0e8;
+
+  /* surfaces */
+  --bg: #f8f4ee;
+  --bg-subtle: #f2ece4;
   --surface: #ffffff;
-  --surface-2: #f3ede6;
+  --surface-2: #f5efe8;
   --surface-3: #ebe4db;
-  --border: #e8e0d6;
-  --border-strong: #d8cfc4;
-  --text: #2a2622;
-  --text-muted: #555048;
-  --text-dim: #736b62;
-  --accent: #e8b8a8;
-  --accent-hover: #dfaa98;
-  --accent-fg: #9a5c44;
-  --accent-soft: #e8b8a845;
-  --accent-glow: #e8b8a855;
-  --btn-on: #3d2e28;
-  --title-from: #7a5040;
-  --title-to: #4a6880;
-  --brand-glaze: #f5dcc8;
-  --brand-icing: #b8d4e8;
-  --donut-outer: #e8c4b0;
-  --donut-inner: #f8ebe0;
-  --donut-hole: #faf7f2;
-  --donut-glaze: #c8dce8;
-  --ja: #8ec0e8;
-  --ko: #98d8c8;
-  --ja-fg: #3a6888;
-  --ko-fg: #3a7868;
-  --live: #6ab88a;
-  --live-fg: #ffffff;
-  --live-soft: #6ab88a33;
-  --record: #d89090;
-  --record-fg: #ffffff;
-  --record-hover: #c88080;
-  --record-soft: #d8909033;
-  --error: #c45050;
-  --off: #8a8278;
-  --off-soft: #8a827833;
-  --header-bg: rgba(255, 255, 255, 0.9);
-  --overlay-bg: rgba(74, 69, 64, 0.35);
-  --col-ja-top: #eef4fa;
-  --col-ko-top: #eef8f4;
+  --border: #e0d8ce;
+  --border-strong: #cfc5b8;
+
+  /* text — always readable on surfaces */
+  --text: #2c2620;
+  --text-muted: #5e564c;
+  --text-dim: #8a8074;
+
+  /* interactive fills */
+  --accent: #c07848;
+  --accent-hover: #a86838;
+  --on-accent: #ffffff;
+  --accent-soft: #c0784826;
+  --accent-glow: #c0784840;
+
+  /* brand & title emphasis */
+  --brand: #8b4e30;
+  --brand-secondary: #3d5a72;
+
+  /* language identity (text) */
+  --ja: #2a6080;
+  --ko: #2a7060;
+  --ja-soft: #e8f0f8;
+  --ko-soft: #e8f4f0;
+
+  /* status */
+  --live: #3a9460;
+  --on-live: #ffffff;
+  --live-soft: #3a946026;
+  --record: #c05050;
+  --on-record: #ffffff;
+  --record-hover: #a84040;
+  --record-soft: #c0505026;
+  --error: #b84040;
+  --off: #8a8074;
+  --off-soft: #8a807426;
+
+  /* donut illustration (decorative only) */
+  --donut-outer: #e0b898;
+  --donut-inner: #f5e8dc;
+  --donut-hole: #f8f4ee;
+  --donut-glaze: #a8c8d8;
+
+  /* layout */
+  --header-bg: rgba(248, 244, 238, 0.92);
+  --overlay-bg: rgba(44, 38, 32, 0.4);
+  --col-ja-top: var(--ja-soft);
+  --col-ko-top: var(--ko-soft);
   --qr-bg: #ffffff;
-  --pulse-rgb: 136, 200, 160;
+  --pulse-rgb: 58, 148, 96;
+
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
-  --shadow-sm: 0 1px 4px rgba(74, 69, 64, 0.07);
-  --shadow-md: 0 8px 28px rgba(74, 69, 64, 0.1);
-  --shadow-lg: 0 16px 48px rgba(74, 69, 64, 0.14);
+  --shadow-sm: 0 1px 4px rgba(44, 38, 32, 0.08);
+  --shadow-md: 0 8px 28px rgba(44, 38, 32, 0.12);
+  --shadow-lg: 0 16px 48px rgba(44, 38, 32, 0.16);
   --font: 'Noto Sans JP', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --mono: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1c2028;
-  --bg-subtle: #222830;
-  --surface: #2a3040;
-  --surface-2: #323848;
-  --surface-3: #3a4250;
-  --border: #444c5c;
-  --border-strong: #525c6c;
-  --text: #f0f2f6;
-  --text-muted: #c0c8d4;
-  --text-dim: #98a0ac;
-  --accent: #e8c0b0;
-  --accent-hover: #f0d0c0;
-  --accent-fg: #f0d0c0;
-  --accent-soft: #e8c0b035;
-  --accent-glow: #e8c0b045;
-  --btn-on: #ffffff;
-  --title-from: #f0d8c8;
-  --title-to: #a8c8e8;
-  --brand-glaze: #f0dcc8;
-  --brand-icing: #a8c8d8;
-  --donut-outer: #d8b8a8;
-  --donut-inner: #f0dcc8;
-  --donut-hole: #1c2028;
-  --donut-glaze: #a8c8d8;
-  --ja: #98c8e8;
-  --ko: #a0dcd0;
-  --ja-fg: #a8d4f0;
-  --ko-fg: #a8e8d8;
-  --live: #6ab88a;
-  --live-fg: #ffffff;
-  --live-soft: #6ab88a33;
-  --record: #d89090;
-  --record-fg: #ffffff;
-  --record-hover: #c88080;
-  --record-soft: #d8909033;
-  --error: #f0a0a0;
-  --off: #78808c;
-  --off-soft: #78808c33;
-  --header-bg: rgba(42, 48, 64, 0.92);
+
+  --bg: #15171c;
+  --bg-subtle: #1a1d23;
+  --surface: #22262e;
+  --surface-2: #2a2f38;
+  --surface-3: #323843;
+  --border: #3a404c;
+  --border-strong: #4a5260;
+
+  --text: #eceae6;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+
+  --accent: #c8956c;
+  --accent-hover: #d4a67a;
+  --on-accent: #ffffff;
+  --accent-soft: #c8956c22;
+  --accent-glow: #c8956c30;
+
+  --brand: #e8d4b8;
+  --brand-secondary: #9bb8c8;
+
+  --ja: #7aa8c8;
+  --ko: #7eb8a8;
+  --ja-soft: #1a2228;
+  --ko-soft: #1a2420;
+
+  --live: #5cb87a;
+  --on-live: #ffffff;
+  --live-soft: #5cb87a22;
+  --record: #c07070;
+  --on-record: #ffffff;
+  --record-hover: #b06060;
+  --record-soft: #c0707022;
+  --error: #c07070;
+  --off: #6b7280;
+  --off-soft: #6b728022;
+
+  --donut-outer: #c8956c;
+  --donut-inner: #e8d4b8;
+  --donut-hole: #15171c;
+  --donut-glaze: #9bb8c8;
+
+  --header-bg: rgba(34, 38, 46, 0.92);
   --overlay-bg: rgba(0, 0, 0, 0.55);
-  --col-ja-top: #242c38;
-  --col-ko-top: #243028;
+  --col-ja-top: var(--ja-soft);
+  --col-ko-top: var(--ko-soft);
   --qr-bg: #ffffff;
-  --pulse-rgb: 136, 200, 160;
-  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.28);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.35);
+  --pulse-rgb: 92, 184, 122;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -157,7 +178,7 @@ button, input, select, textarea {
   border: none;
   border-radius: var(--radius);
   background: var(--accent);
-  color: var(--btn-on);
+  color: var(--on-accent);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;

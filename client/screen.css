@@ -33,7 +33,7 @@ body {
 .lobby-logo {
   font-size: 14px;
   font-weight: 700;
-  color: var(--accent-fg);
+  color: var(--brand);
   letter-spacing: 0.04em;
   margin-bottom: 8px;
 }
@@ -60,7 +60,7 @@ body {
   border: none;
   border-radius: var(--radius);
   background: var(--accent);
-  color: var(--btn-on);
+  color: var(--on-accent);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -97,7 +97,7 @@ body {
 .topbar-brand {
   font-size: 13px;
   font-weight: 700;
-  color: var(--accent-fg);
+  color: var(--brand);
   white-space: nowrap;
 }
 .topbar-room {
@@ -167,8 +167,8 @@ body {
   margin-bottom: 20px;
   flex-shrink: 0;
 }
-.col-ja .col-label { color: var(--ja-fg); }
-.col-ko .col-label { color: var(--ko-fg); }
+.col-ja .col-label { color: var(--ja); }
+.col-ko .col-label { color: var(--ko); }
 .col-label-code {
   font-family: var(--mono);
   font-size: 11px;
@@ -221,7 +221,6 @@ body {
 .history-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
 
 .hist-item {
-  color: var(--text-muted);
   font-size: clamp(12px, 1.3vw, 18px);
   line-height: 1.55;
   color: var(--text-muted);

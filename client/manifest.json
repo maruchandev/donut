@@ -4,8 +4,8 @@
   "description": "話すだけで翻訳が届く、日韓カジュアル通訳サービス",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#faf7f2",
-  "theme_color": "#e8b8a8",
+  "background_color": "#f8f4ee",
+  "theme_color": "#c07848",
   "icons": [
     {
       "src": "favicon.svg",

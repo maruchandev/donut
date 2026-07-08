@@ -1,6 +1,6 @@
 (function (global) {
   var KEY = 'donut-theme';
-  var META = { light: '#faf7f2', dark: '#1c2028' };
+  var META = { light: '#f8f4ee', dark: '#15171c' };
 
   function preferred() {
     return global.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
