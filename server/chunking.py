@@ -4,8 +4,16 @@ import os
 import re
 
 CHUNK_MAX_CHARS = int(os.getenv("CHUNK_MAX_CHARS", "500"))
+API_MAX_TOKENS_BASE = int(os.getenv("API_MAX_TOKENS", "2048"))
+API_MAX_TOKENS_CAP = int(os.getenv("API_MAX_TOKENS_CAP", "8192"))
 
-_SENTENCE_SPLIT = re.compile(r"(?<=[。！？.!?])\s*")
+_SENTENCE_SPLIT = re.compile(r"(?<=[。！？.!?\n])\s*")
+
+
+def max_tokens_for_piece(piece: str) -> int:
+    """Scale output budget with source length (CJK output is often ~1–2× source)."""
+    scaled = max(API_MAX_TOKENS_BASE, len(piece) * 3)
+    return min(API_MAX_TOKENS_CAP, scaled)
 
 
 def split_text(text: str, max_chars: int = CHUNK_MAX_CHARS) -> list[str]:

@@ -34,7 +34,7 @@ import aiosqlite
 
 import auth
 import db
-from chunking import split_text
+from chunking import max_tokens_for_piece, split_text
 
 load_dotenv()
 
@@ -44,7 +44,7 @@ API_KEY = os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.deepseek.com/v1")
 API_MODEL = os.getenv("API_MODEL", "deepseek-chat")
 API_TEMPERATURE = float(os.getenv("API_TEMPERATURE", "0.1"))
-API_MAX_TOKENS = int(os.getenv("API_MAX_TOKENS", "512"))
+API_MAX_TOKENS = int(os.getenv("API_MAX_TOKENS", "2048"))
 ORIGINS = os.getenv("ORIGINS", "*")
 ROOM_IDLE_SECS = int(os.getenv("ROOM_IDLE_SECS", "3600"))
 ROOM_CLEANUP_INTERVAL = int(os.getenv("ROOM_CLEANUP_INTERVAL", "60"))
@@ -96,6 +96,11 @@ AUTO_PROMPT = (
     "accordingly. Be forgiving of grammar errors in the source. "
     "Preserve the tone and formality of the original. "
     "Output ONLY the translation, no explanations, no notes, no greetings."
+)
+
+CONTINUE_PROMPT = (
+    "Continue the translation from exactly where you stopped. "
+    "Output ONLY the remaining translation with no repetition or commentary."
 )
 
 LANG_MAP = {"ja": "Japanese", "ko": "Korean"}
@@ -354,6 +359,61 @@ async def send_to(ws: WebSocket, data: str):
 def utterance_key(room_id: str, uid: str) -> str:
     return f"{room_id}:{uid}"
 
+async def stream_translate_pieces(
+    *,
+    room_id: str,
+    pieces: list[str],
+    system_content: str,
+    state: dict,
+    should_abort,
+    make_chunk_payload,
+) -> None:
+    """Translate each source piece; auto-continue when max_tokens truncates output."""
+    for piece in pieces:
+        if should_abort():
+            return
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": piece},
+        ]
+        while True:
+            if should_abort():
+                return
+            stream = await client.chat.completions.create(
+                model=API_MODEL,
+                messages=messages,
+                stream=True,
+                temperature=API_TEMPERATURE,
+                max_tokens=max_tokens_for_piece(piece),
+            )
+            segment = ""
+            finish_reason = None
+            async for chunk in stream:
+                if should_abort():
+                    return
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+                t = choice.delta.content
+                if not t:
+                    continue
+                segment += t
+                state["tgt"] += t
+                await broadcast(
+                    room_id,
+                    json.dumps(make_chunk_payload(t), ensure_ascii=False),
+                )
+            if finish_reason != "length" or not segment:
+                break
+            logger.warning(
+                "translation truncated (length), continuing | piece_len=%d seg_len=%d",
+                len(piece), len(segment),
+            )
+            messages.extend([
+                {"role": "assistant", "content": segment},
+                {"role": "user", "content": CONTINUE_PROMPT},
+            ])
+
 async def handle_translate(
     ws: WebSocket,
     room_id: str,
@@ -399,36 +459,31 @@ async def handle_translate(
         full_src = state["src"]
         rev = state["_rev"]
 
+        def should_abort() -> bool:
+            return state.get("_rev") != utterance_rev.get(key, 0)
+
+        def make_chunk_payload(_t: str) -> dict:
+            return {
+                "type": "t_chunk",
+                "text": _t,
+                "acc": state["tgt"],
+                "uid": uid,
+                "final": final,
+                "spk": spk,
+                "src": full_src,
+                "src_lang": use_src,
+                "tgt_lang": target,
+            }
+
         try:
-            for piece in split_text(text):
-                stream = await client.chat.completions.create(
-                    model=API_MODEL,
-                    messages=[
-                        {"role": "system", "content": ctx + prompt},
-                        {"role": "user", "content": piece},
-                    ],
-                    stream=True,
-                    temperature=API_TEMPERATURE,
-                    max_tokens=API_MAX_TOKENS,
-                )
-                async for chunk in stream:
-                    if state.get("_rev") != utterance_rev.get(key, 0):
-                        return
-                    t = chunk.choices[0].delta.content
-                    if not t:
-                        continue
-                    state["tgt"] += t
-                    await broadcast(room_id, json.dumps({
-                        "type": "t_chunk",
-                        "text": t,
-                        "acc": state["tgt"],
-                        "uid": uid,
-                        "final": final,
-                        "spk": spk,
-                        "src": full_src,
-                        "src_lang": use_src,
-                        "tgt_lang": target,
-                    }, ensure_ascii=False))
+            await stream_translate_pieces(
+                room_id=room_id,
+                pieces=split_text(text),
+                system_content=ctx + prompt,
+                state=state,
+                should_abort=should_abort,
+                make_chunk_payload=make_chunk_payload,
+            )
         except Exception as e:
             logger.error("API error: %s", e)
             await send_to(ws, json.dumps({
@@ -437,7 +492,7 @@ async def handle_translate(
             return
 
         if final:
-            if state.get("_rev") != utterance_rev.get(key, 0):
+            if should_abort():
                 return
             await broadcast(room_id, json.dumps({
                 "type": "t_done",
@@ -508,35 +563,29 @@ async def handle_retranslate(
         utterance_state[key] = state
         full_src = text
 
+        def make_chunk_payload(_t: str) -> dict:
+            return {
+                "type": "t_chunk",
+                "text": _t,
+                "acc": state["tgt"],
+                "uid": uid,
+                "final": True,
+                "revised": True,
+                "spk": spk,
+                "src": full_src,
+                "src_lang": use_src,
+                "tgt_lang": target,
+            }
+
         try:
-            for piece in split_text(text):
-                stream = await client.chat.completions.create(
-                    model=API_MODEL,
-                    messages=[
-                        {"role": "system", "content": ctx + prompt},
-                        {"role": "user", "content": piece},
-                    ],
-                    stream=True,
-                    temperature=API_TEMPERATURE,
-                    max_tokens=API_MAX_TOKENS,
-                )
-                async for chunk in stream:
-                    t = chunk.choices[0].delta.content
-                    if not t:
-                        continue
-                    state["tgt"] += t
-                    await broadcast(room_id, json.dumps({
-                        "type": "t_chunk",
-                        "text": t,
-                        "acc": state["tgt"],
-                        "uid": uid,
-                        "final": True,
-                        "revised": True,
-                        "spk": spk,
-                        "src": full_src,
-                        "src_lang": use_src,
-                        "tgt_lang": target,
-                    }, ensure_ascii=False))
+            await stream_translate_pieces(
+                room_id=room_id,
+                pieces=split_text(text),
+                system_content=ctx + prompt,
+                state=state,
+                should_abort=lambda: False,
+                make_chunk_payload=make_chunk_payload,
+            )
         except Exception as e:
             logger.error("API error (retranslate): %s", e)
             await send_to(ws, json.dumps({
