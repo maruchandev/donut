@@ -36,6 +36,7 @@ import auth
 import db
 from chunk_context import SpeakerChunkStore, build_chunk_user_content
 from chunking import max_tokens_for_piece, split_text
+from text_format import format_display_text
 
 load_dotenv()
 
@@ -89,14 +90,18 @@ JSON_TRANSLATE_RULES = (
     "(transliterate only when a standard target-language form exists). "
     "Never insert a line break inside a technical term or compound noun. "
     "\n\n"
-    "PUNCTUATION & LINE BREAKS: ASR usually omits them. You MUST restore natural "
-    "punctuation for each language (Japanese: 、。！？ ; Korean: . ! ? and natural "
-    "endings such as 요/다). Put a newline ONLY between clearly separate sentences "
-    "(after sentence-final punctuation). Do not break a single short clause into "
-    "multiple lines. "
-    "\n\n"
+    "PUNCTUATION & LINE BREAKS (critical):\n"
+    "- ASR usually omits them; you MUST restore them.\n"
+    "- Japanese: use 、 and sentence-final 。！？\n"
+    "- Korean: use sentence-final . ! ?\n"
+    "- After EVERY sentence-final mark, put a real newline character (\\n) before "
+    "the next sentence. Example JA: \"こんにちは。\\n今日はいい天気です。\"\n"
+    "- Example KO: \"안녕하세요.\\n오늘 날씨가 좋네요.\"\n"
+    "- Do NOT put the whole paragraph on one line.\n"
+    "- Do not break inside technical terms or a single short clause.\n"
+    "\n"
     "Respond with ONE JSON object only (no markdown fences, no commentary). Schema:\n"
-    '{"ja":"<Japanese text>","ko":"<Korean text>"}\n'
+    '{"ja":"line1。\\nline2。","ko":"line1.\\nline2."}\n'
     "Rules for fields:\n"
     "- Always fill both \"ja\" and \"ko\".\n"
     "- If the new fragment is Japanese, \"ja\" = polished source (light ASR cleanup + "
@@ -474,16 +479,22 @@ def parse_bilingual_json(raw: str) -> tuple[str, str]:
 def polished_and_translation(
     ja: str, ko: str, source_lang: str, raw_fallback: str
 ) -> tuple[str, str]:
-    """Map bilingual fields → (polished_source, translation)."""
+    """Map bilingual fields → (polished_source, translation) with forced line breaks."""
+    ja = format_display_text(ja or "", "ja")
+    ko = format_display_text(ko or "", "ko")
     if source_lang == "ko":
-        polished = ko or raw_fallback
+        polished = ko or format_display_text(raw_fallback, "ko")
         translation = ja
     else:
-        polished = ja or raw_fallback
+        polished = ja or format_display_text(raw_fallback, "ja")
         translation = ko
     if not translation:
         # Fall back to whichever side is not the polished source.
         translation = (ko if polished == ja else ja) or ""
+    # Re-apply after mapping in case one side was empty earlier.
+    polished = format_display_text(polished, source_lang if source_lang in ("ja", "ko") else "ja")
+    tgt_lang = "ko" if source_lang == "ja" else "ja"
+    translation = format_display_text(translation, tgt_lang)
     return polished, translation
 
 
