@@ -75,6 +75,15 @@ if not API_KEY:
 
 client = AsyncOpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
+PUNCT_FMT = (
+    "Speech recognition often omits punctuation and line breaks. "
+    "In the translation, insert natural punctuation and line breaks "
+    "appropriate for the TARGET language: "
+    "Japanese → use 、 。 ！ ？ and newlines between sentences or clear pauses; "
+    "Korean → use , . ! ? and 요/다 sentence endings with newlines between sentences. "
+    "Do not add meta commentary; only format the translated speech naturally."
+)
+
 STREAM_PROMPT = (
     "You are a real-time interpreter for speech recognition input. "
     "Detect whether the input is Japanese or Korean, "
@@ -83,6 +92,7 @@ STREAM_PROMPT = (
     "mid-sentence corrections). Infer the intended meaning and translate "
     "accordingly. Be forgiving of grammar errors in the source. "
     "Preserve the tone and formality of the original. "
+    + PUNCT_FMT + " "
     "Output ONLY the translation, no explanations, no notes, no greetings."
 )
 
@@ -95,6 +105,7 @@ AUTO_PROMPT = (
     "mid-sentence corrections). Infer the intended meaning and translate "
     "accordingly. Be forgiving of grammar errors in the source. "
     "Preserve the tone and formality of the original. "
+    + PUNCT_FMT + " "
     "Output ONLY the translation, no explanations, no notes, no greetings."
 )
 

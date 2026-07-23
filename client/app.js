@@ -22,12 +22,15 @@ let scrollTimer = null;
 
 /*
  * Speech pipeline (final-segment / server-driven):
- * - Web Speech interim → local preview only (never translate)
- * - Each isFinal result → one segment, one bubble, sent once
- * - Server broadcasts source immediately, translates async with prior-chunk context
- * - Client + server hash dedupe prevent multi-send storms
+ * - interim → local preview only
+ * - isFinal → send delta once
+ * - text-idle → if recognized text stops growing for N ms (even with えー fillers
+ *   keeping the mic "busy"), flush unsent interim delta (not audio silence)
+ * - Server: src-first broadcast + prior-chunk context + dedupe
  */
 const SPEECH_MIN_SEND_CHARS = 2;
+const SPEECH_TEXT_IDLE_MS = 1800;       /* no new characters for this long → cut */
+const SPEECH_TEXT_IDLE_MIN_CHARS = 4;   /* ignore tiny fragments on idle flush */
 const SPEECH_DEDUP_MAX = 48;
 const SPEECH_DEDUP_TTL_MS = 5 * 60 * 1000;
 
@@ -37,6 +40,11 @@ let speechEmittedKeys = {};
 let speechRecGen = 0;
 /** Recent sent chunks for duplicate suppression { hash, at }. */
 let speechSentHashes = [];
+/** Cumulative normalized text already sent this recording (for delta sends). */
+let speechSentCumulativeNorm = '';
+/** Last live transcript string we observed (for text-stall detection). */
+let speechWatchText = '';
+let speechTextIdleTimer = null;
 
 const lobbyEl = document.getElementById('lobby');
 const chatEl = document.getElementById('chat');
@@ -1084,7 +1092,7 @@ function insertNewlineAtCursor(el) {
   el.selectionEnd = pos;
 }
 
-/* ---- recording (final-segment / server-driven) ---- */
+/* ---- recording (final-segment / text-idle / server-driven) ---- */
 
 function normalizeSpeechText(s) {
   return String(s || '').replace(/\s+/g, '').toLowerCase();
@@ -1127,11 +1135,55 @@ function isDuplicateSpeech(text) {
   return false;
 }
 
+/** Shortest raw suffix of `raw` whose normalized form equals `restNorm`. */
+function rawTailMatchingNorm(raw, restNorm) {
+  if (!restNorm) return '';
+  var i;
+  for (i = 0; i < raw.length; i++) {
+    if (normalizeSpeechText(raw.slice(i)) === restNorm) {
+      return raw.slice(i).trim();
+    }
+  }
+  return restNorm;
+}
+
+/**
+ * If `text` extends already-sent cumulative content, return only the new tail.
+ * Otherwise return the full trimmed text (new segment).
+ */
+function speechDeltaFrom(text) {
+  text = (text || '').trim();
+  if (!text) return '';
+  var h = normalizeSpeechText(text);
+  if (!h) return '';
+  if (speechSentCumulativeNorm) {
+    if (h === speechSentCumulativeNorm || speechSentCumulativeNorm.indexOf(h) === 0) {
+      return '';
+    }
+    if (h.indexOf(speechSentCumulativeNorm) === 0) {
+      var restNorm = h.slice(speechSentCumulativeNorm.length);
+      if (!restNorm) return '';
+      return rawTailMatchingNorm(text, restNorm);
+    }
+  }
+  return text;
+}
+
+function clearSpeechTextIdleTimer() {
+  if (speechTextIdleTimer) {
+    clearTimeout(speechTextIdleTimer);
+    speechTextIdleTimer = null;
+  }
+}
+
 function resetSpeechState() {
   speechInterim = '';
   speechEmittedKeys = {};
   speechRecGen = 0;
   speechSentHashes = [];
+  speechSentCumulativeNorm = '';
+  speechWatchText = '';
+  clearSpeechTextIdleTimer();
 }
 
 function clearLocalInterim() {
@@ -1166,17 +1218,57 @@ function updateSpeechPreview(interimText) {
 }
 
 /**
- * One ASR final = one chat bubble. Server adds prior-chunk context and
- * broadcasts source immediately before translation streams in.
+ * Send one bubble for the unsent delta of `text`.
+ * Used for ASR finals and text-idle interim flushes.
  */
-function emitFinalSegment(text) {
-  text = (text || '').trim();
-  if (text.length < SPEECH_MIN_SEND_CHARS) return false;
-  if (isDuplicateSpeech(text)) return false;
-  rememberSpeechSent(text);
-  // New uid per final segment (no client-side frame merging).
-  send(text, true);
+function emitSpeechDelta(text) {
+  var delta = speechDeltaFrom(text);
+  delta = (delta || '').trim();
+  if (delta.length < SPEECH_MIN_SEND_CHARS) return false;
+  if (isDuplicateSpeech(delta)) return false;
+  rememberSpeechSent(delta);
+  speechSentCumulativeNorm += normalizeSpeechText(delta);
+  send(delta, true);
   return true;
+}
+
+/**
+ * Arm / re-arm text-stall flush. Cuts when recognized characters stop growing,
+ * even if the user fills silence with えー / 음… (audio silence never comes).
+ */
+function noteSpeechTextActivity(liveText) {
+  var t = (liveText || '').trim();
+  var norm = normalizeSpeechText(t);
+  var prevNorm = normalizeSpeechText(speechWatchText);
+  if (norm !== prevNorm) {
+    // Characters changed → restart the stall clock.
+    speechWatchText = t;
+    scheduleTextIdleFlush();
+    return;
+  }
+  // Same text: do NOT reset the timer (otherwise repeated interim events never flush).
+  if (t && !speechTextIdleTimer && speechDeltaFrom(t)) {
+    scheduleTextIdleFlush();
+  }
+}
+
+function scheduleTextIdleFlush() {
+  clearSpeechTextIdleTimer();
+  if (!isRecording) return;
+  var live = (speechInterim || speechWatchText || '').trim();
+  if (normalizeSpeechText(live).length < SPEECH_TEXT_IDLE_MIN_CHARS) return;
+  // Only worth waiting if there is an unsent delta.
+  if (!speechDeltaFrom(live)) return;
+
+  speechTextIdleTimer = setTimeout(function() {
+    speechTextIdleTimer = null;
+    if (!isRecording) return;
+    var t = (speechInterim || speechWatchText || '').trim();
+    if (!t) return;
+    if (normalizeSpeechText(t).length < SPEECH_TEXT_IDLE_MIN_CHARS) return;
+    emitSpeechDelta(t);
+    // If text is still the same, no re-arm; new onresult will re-arm.
+  }, SPEECH_TEXT_IDLE_MS);
 }
 
 function processSpeechResults(results, resultIndex) {
@@ -1187,7 +1279,7 @@ function processSpeechResults(results, resultIndex) {
     if (speechEmittedKeys[key]) continue;
     speechEmittedKeys[key] = true;
     var piece = (results[i][0] && results[i][0].transcript) || '';
-    emitFinalSegment(piece);
+    emitSpeechDelta(piece);
   }
 
   var interim = '';
@@ -1198,13 +1290,16 @@ function processSpeechResults(results, resultIndex) {
     }
   }
   updateSpeechPreview(interim);
+  // Watch interim (or last final piece) for character-stall segmentation.
+  noteSpeechTextActivity(interim || speechWatchText);
 }
 
 function flushInterimOnStop() {
-  var t = (speechInterim || '').trim();
+  clearSpeechTextIdleTimer();
+  var t = (speechInterim || speechWatchText || '').trim();
   speechInterim = '';
   clearLocalInterim();
-  if (t) emitFinalSegment(t);
+  if (t) emitSpeechDelta(t);
 }
 
 function startRecording() {
@@ -1234,7 +1329,6 @@ function startRecording() {
     if (!isRecording) return;
     // New recognition generation: result indices reset; do NOT re-send past finals.
     speechRecGen += 1;
-    // Keep interim preview; finals already emitted. Restart engine.
     try { recognition.start(); } catch (e) {}
   };
 
