@@ -24,12 +24,15 @@ class ChunkContextTests(unittest.TestCase):
         self.assertIn("今日の天気は", out)
         self.assertIn("do not translate", out.lower())
 
-    def test_store_keeps_last_two(self):
+    def test_store_keeps_last_n(self):
         store = SpeakerChunkStore(maxlen=PREV_CHUNK_CTX)
         store.append("123456", "いちご", "A")
         store.append("123456", "いちご", "B")
         store.append("123456", "いちご", "C")
-        self.assertEqual(store.get_prev("123456", "いちご"), ["B", "C"])
+        store.append("123456", "いちご", "D")
+        # Default PREV_CHUNK_CTX is 3 → keep last three.
+        self.assertEqual(store.get_prev("123456", "いちご"), ["B", "C", "D"][-PREV_CHUNK_CTX:])
+        self.assertEqual(len(store.get_prev("123456", "いちご")), PREV_CHUNK_CTX)
 
     def test_store_is_per_speaker(self):
         store = SpeakerChunkStore()
