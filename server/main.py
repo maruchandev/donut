@@ -76,12 +76,18 @@ if not API_KEY:
 client = AsyncOpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
 PUNCT_FMT = (
-    "Speech recognition often omits punctuation and line breaks. "
-    "In the translation, insert natural punctuation and line breaks "
-    "appropriate for the TARGET language: "
-    "Japanese → use 、 。 ！ ？ and newlines between sentences or clear pauses; "
-    "Korean → use , . ! ? and 요/다 sentence endings with newlines between sentences. "
-    "Do not add meta commentary; only format the translated speech naturally."
+    "Speech recognition often omits punctuation. "
+    "In the translation only, add natural punctuation for the TARGET language "
+    "(Japanese: 、。！？ ; Korean: . ! ? and natural sentence endings). "
+    "Use a newline only between clearly separate sentences. "
+    "Do not invent content; do not split one short clause across lines."
+)
+
+FRAGMENT_FMT = (
+    "Segments may be partial clauses. Use provided context to keep meaning "
+    "coherent, but translate only the new fragment. "
+    "If the fragment is only a sentence ending or tail, produce a natural "
+    "continuation, not an odd standalone phrase."
 )
 
 STREAM_PROMPT = (
@@ -92,6 +98,7 @@ STREAM_PROMPT = (
     "mid-sentence corrections). Infer the intended meaning and translate "
     "accordingly. Be forgiving of grammar errors in the source. "
     "Preserve the tone and formality of the original. "
+    + FRAGMENT_FMT + " "
     + PUNCT_FMT + " "
     "Output ONLY the translation, no explanations, no notes, no greetings."
 )
@@ -105,6 +112,7 @@ AUTO_PROMPT = (
     "mid-sentence corrections). Infer the intended meaning and translate "
     "accordingly. Be forgiving of grammar errors in the source. "
     "Preserve the tone and formality of the original. "
+    + FRAGMENT_FMT + " "
     + PUNCT_FMT + " "
     "Output ONLY the translation, no explanations, no notes, no greetings."
 )
@@ -200,7 +208,7 @@ def prune_src_dedup(key: str, now: float | None = None) -> None:
 
 
 def is_duplicate_src(room_id: str, spk: str, text: str) -> bool:
-    """Return True if the same (or near-identical) source was just translated."""
+    """Return True if the exact same normalized source was just translated."""
     h = normalize_src_hash(text)
     if not h or len(h) < 2:
         return True
@@ -210,11 +218,6 @@ def is_duplicate_src(room_id: str, spk: str, text: str) -> bool:
     for _, prev in recent_src_hashes.get(key, []):
         if prev == h:
             return True
-        if len(h) >= 6 and len(prev) >= 6:
-            if h in prev and len(h) / len(prev) >= 0.85:
-                return True
-            if prev in h and len(prev) / len(h) >= 0.85:
-                return True
     return False
 
 

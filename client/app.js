@@ -22,15 +22,15 @@ let scrollTimer = null;
 
 /*
  * Speech pipeline (final-segment / server-driven):
- * - interim → local preview only
- * - isFinal → send delta once
- * - text-idle → if recognized text stops growing for N ms (even with えー fillers
- *   keeping the mic "busy"), flush unsent interim delta (not audio silence)
- * - Server: src-first broadcast + prior-chunk context + dedupe
+ * - interim → local preview only (do NOT translate mid-hypothesis)
+ * - isFinal → send unsent delta once (quality: wait for ASR final, not 1.8s stall)
+ * - stop → flush remaining interim
+ * - Server: src-first + prior-chunk context + exact dedupe
+ *
+ * Note: text-idle interim flush was tried and hurt quality (mid-sentence cuts
+ * like "な気がします" alone). Prefer isFinal even if えー delays finals.
  */
 const SPEECH_MIN_SEND_CHARS = 2;
-const SPEECH_TEXT_IDLE_MS = 1800;       /* no new characters for this long → cut */
-const SPEECH_TEXT_IDLE_MIN_CHARS = 4;   /* ignore tiny fragments on idle flush */
 const SPEECH_DEDUP_MAX = 48;
 const SPEECH_DEDUP_TTL_MS = 5 * 60 * 1000;
 
@@ -38,13 +38,10 @@ let speechInterim = '';
 /** result keys already emitted this recognition generation: "gen:index" */
 let speechEmittedKeys = {};
 let speechRecGen = 0;
-/** Recent sent chunks for duplicate suppression { hash, at }. */
+/** Recent sent chunks for exact-hash duplicate suppression { hash, at }. */
 let speechSentHashes = [];
 /** Cumulative normalized text already sent this recording (for delta sends). */
 let speechSentCumulativeNorm = '';
-/** Last live transcript string we observed (for text-stall detection). */
-let speechWatchText = '';
-let speechTextIdleTimer = null;
 
 const lobbyEl = document.getElementById('lobby');
 const chatEl = document.getElementById('chat');
@@ -1092,7 +1089,7 @@ function insertNewlineAtCursor(el) {
   el.selectionEnd = pos;
 }
 
-/* ---- recording (final-segment / text-idle / server-driven) ---- */
+/* ---- recording (final-segment / server-driven) ---- */
 
 function normalizeSpeechText(s) {
   return String(s || '').replace(/\s+/g, '').toLowerCase();
@@ -1118,6 +1115,7 @@ function rememberSpeechSent(text) {
   }
 }
 
+/** Exact match only — fuzzy near-dup was dropping valid extensions / odd tails. */
 function isDuplicateSpeech(text) {
   var h = normalizeSpeechText(text);
   if (!h) return true;
@@ -1125,12 +1123,7 @@ function isDuplicateSpeech(text) {
   pruneSpeechDedupLedger();
   var i;
   for (i = 0; i < speechSentHashes.length; i++) {
-    var prev = speechSentHashes[i].hash;
-    if (prev === h) return true;
-    if (h.length >= 6 && prev.length >= 6) {
-      if (prev.indexOf(h) !== -1 && h.length / prev.length >= 0.85) return true;
-      if (h.indexOf(prev) !== -1 && prev.length / h.length >= 0.85) return true;
-    }
+    if (speechSentHashes[i].hash === h) return true;
   }
   return false;
 }
@@ -1169,21 +1162,12 @@ function speechDeltaFrom(text) {
   return text;
 }
 
-function clearSpeechTextIdleTimer() {
-  if (speechTextIdleTimer) {
-    clearTimeout(speechTextIdleTimer);
-    speechTextIdleTimer = null;
-  }
-}
-
 function resetSpeechState() {
   speechInterim = '';
   speechEmittedKeys = {};
   speechRecGen = 0;
   speechSentHashes = [];
   speechSentCumulativeNorm = '';
-  speechWatchText = '';
-  clearSpeechTextIdleTimer();
 }
 
 function clearLocalInterim() {
@@ -1218,8 +1202,8 @@ function updateSpeechPreview(interimText) {
 }
 
 /**
- * Send one bubble for the unsent delta of `text`.
- * Used for ASR finals and text-idle interim flushes.
+ * Send one bubble for the unsent delta of an ASR *final* (or stop flush).
+ * Never called on unstable interim — that was splitting sentences mid-way.
  */
 function emitSpeechDelta(text) {
   var delta = speechDeltaFrom(text);
@@ -1230,45 +1214,6 @@ function emitSpeechDelta(text) {
   speechSentCumulativeNorm += normalizeSpeechText(delta);
   send(delta, true);
   return true;
-}
-
-/**
- * Arm / re-arm text-stall flush. Cuts when recognized characters stop growing,
- * even if the user fills silence with えー / 음… (audio silence never comes).
- */
-function noteSpeechTextActivity(liveText) {
-  var t = (liveText || '').trim();
-  var norm = normalizeSpeechText(t);
-  var prevNorm = normalizeSpeechText(speechWatchText);
-  if (norm !== prevNorm) {
-    // Characters changed → restart the stall clock.
-    speechWatchText = t;
-    scheduleTextIdleFlush();
-    return;
-  }
-  // Same text: do NOT reset the timer (otherwise repeated interim events never flush).
-  if (t && !speechTextIdleTimer && speechDeltaFrom(t)) {
-    scheduleTextIdleFlush();
-  }
-}
-
-function scheduleTextIdleFlush() {
-  clearSpeechTextIdleTimer();
-  if (!isRecording) return;
-  var live = (speechInterim || speechWatchText || '').trim();
-  if (normalizeSpeechText(live).length < SPEECH_TEXT_IDLE_MIN_CHARS) return;
-  // Only worth waiting if there is an unsent delta.
-  if (!speechDeltaFrom(live)) return;
-
-  speechTextIdleTimer = setTimeout(function() {
-    speechTextIdleTimer = null;
-    if (!isRecording) return;
-    var t = (speechInterim || speechWatchText || '').trim();
-    if (!t) return;
-    if (normalizeSpeechText(t).length < SPEECH_TEXT_IDLE_MIN_CHARS) return;
-    emitSpeechDelta(t);
-    // If text is still the same, no re-arm; new onresult will re-arm.
-  }, SPEECH_TEXT_IDLE_MS);
 }
 
 function processSpeechResults(results, resultIndex) {
@@ -1290,13 +1235,10 @@ function processSpeechResults(results, resultIndex) {
     }
   }
   updateSpeechPreview(interim);
-  // Watch interim (or last final piece) for character-stall segmentation.
-  noteSpeechTextActivity(interim || speechWatchText);
 }
 
 function flushInterimOnStop() {
-  clearSpeechTextIdleTimer();
-  var t = (speechInterim || speechWatchText || '').trim();
+  var t = (speechInterim || '').trim();
   speechInterim = '';
   clearLocalInterim();
   if (t) emitSpeechDelta(t);

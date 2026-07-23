@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-PREV_CHUNK_CTX = 2
+PREV_CHUNK_CTX = 3
 
 CHUNK_CTX_NOTE = (
     "Earlier fragments from the same speaker are context only. "
-    "Use them to infer meaning and keep coherence, but translate ONLY "
+    "Use them to infer meaning and keep coherence (especially when the new "
+    "fragment is a short tail or continuation), but translate ONLY "
     "the new fragment marked below. Do not translate or repeat the context."
 )
 
