@@ -75,51 +75,48 @@ if not API_KEY:
 
 client = AsyncOpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
-PUNCT_FMT = (
-    "Speech recognition often omits punctuation. "
-    "In the translation only, add natural punctuation for the TARGET language "
-    "(Japanese: 、。！？ ; Korean: . ! ? and natural sentence endings). "
-    "Use a newline only between clearly separate sentences. "
-    "Do not invent content; do not split one short clause across lines."
+# Bilingual JSON output: polished source + translation (ja/ko fields always both set).
+JSON_TRANSLATE_RULES = (
+    "You are a real-time interpreter for Japanese↔Korean speech recognition input. "
+    "The input is raw ASR text: it may lack punctuation, contain typos, false starts, "
+    "or mid-sentence corrections. Infer the intended meaning. "
+    "Preserve tone and formality. "
+    "Segments may be partial; use any [Context] only to understand continuity, "
+    "and process ONLY the new fragment (do not re-translate context). "
+    "\n\n"
+    "TECHNICAL TERMS: Keep domain jargon, product names, acronyms, code-like tokens, "
+    "and multi-word technical phrases intact in BOTH languages when appropriate "
+    "(transliterate only when a standard target-language form exists). "
+    "Never insert a line break inside a technical term or compound noun. "
+    "\n\n"
+    "PUNCTUATION & LINE BREAKS: ASR usually omits them. You MUST restore natural "
+    "punctuation for each language (Japanese: 、。！？ ; Korean: . ! ? and natural "
+    "endings such as 요/다). Put a newline ONLY between clearly separate sentences "
+    "(after sentence-final punctuation). Do not break a single short clause into "
+    "multiple lines. "
+    "\n\n"
+    "Respond with ONE JSON object only (no markdown fences, no commentary). Schema:\n"
+    '{"ja":"<Japanese text>","ko":"<Korean text>"}\n'
+    "Rules for fields:\n"
+    "- Always fill both \"ja\" and \"ko\".\n"
+    "- If the new fragment is Japanese, \"ja\" = polished source (light ASR cleanup + "
+    "punctuation/newlines), \"ko\" = full natural Korean translation.\n"
+    "- If the new fragment is Korean, \"ko\" = polished source, \"ja\" = full natural "
+    "Japanese translation.\n"
+    "- Do not invent content that was not implied by the speech."
 )
 
-FRAGMENT_FMT = (
-    "Segments may be partial clauses. Use provided context to keep meaning "
-    "coherent, but translate only the new fragment. "
-    "If the fragment is only a sentence ending or tail, produce a natural "
-    "continuation, not an odd standalone phrase."
+# Kept for rare non-JSON continue paths / explicit target-lang formatting.
+STREAM_PROMPT = JSON_TRANSLATE_RULES + (
+    " Target language preference: {lang}."
+    " Still return the same JSON with both ja and ko filled."
 )
 
-STREAM_PROMPT = (
-    "You are a real-time interpreter for speech recognition input. "
-    "Detect whether the input is Japanese or Korean, "
-    "then translate it to {lang}. "
-    "The input may contain ASR errors (typos, missing words, false starts, "
-    "mid-sentence corrections). Infer the intended meaning and translate "
-    "accordingly. Be forgiving of grammar errors in the source. "
-    "Preserve the tone and formality of the original. "
-    + FRAGMENT_FMT + " "
-    + PUNCT_FMT + " "
-    "Output ONLY the translation, no explanations, no notes, no greetings."
-)
-
-AUTO_PROMPT = (
-    "You are a real-time interpreter for speech recognition input. "
-    "Detect whether the input is Japanese or Korean, "
-    "then translate it to the opposite language. "
-    "(If Japanese → output Korean; if Korean → output Japanese). "
-    "The input may contain ASR errors (typos, missing words, false starts, "
-    "mid-sentence corrections). Infer the intended meaning and translate "
-    "accordingly. Be forgiving of grammar errors in the source. "
-    "Preserve the tone and formality of the original. "
-    + FRAGMENT_FMT + " "
-    + PUNCT_FMT + " "
-    "Output ONLY the translation, no explanations, no notes, no greetings."
-)
+AUTO_PROMPT = JSON_TRANSLATE_RULES
 
 CONTINUE_PROMPT = (
-    "Continue the translation from exactly where you stopped. "
-    "Output ONLY the remaining translation with no repetition or commentary."
+    "Continue the previous JSON translation from exactly where you stopped. "
+    "Output ONLY a valid JSON object with \"ja\" and \"ko\" keys, no fences."
 )
 
 LANG_MAP = {"ja": "Japanese", "ko": "Korean"}
@@ -432,7 +429,65 @@ async def send_to(ws: WebSocket, data: str):
 def utterance_key(room_id: str, uid: str) -> str:
     return f"{room_id}:{uid}"
 
-async def stream_translate_pieces(
+
+def _strip_code_fence(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s.startswith("```"):
+        return s
+    lines = s.split("\n")
+    # drop first fence line and optional trailing fence
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def parse_bilingual_json(raw: str) -> tuple[str, str]:
+    """Parse model JSON into (ja, ko). Raises ValueError on failure."""
+    s = _strip_code_fence(raw)
+    # Tolerate leading/trailing junk around the object.
+    start = s.find("{")
+    end = s.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("no JSON object in model output")
+    data = json.loads(s[start : end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("JSON root is not an object")
+    ja = str(data.get("ja") or data.get("japanese") or "").strip()
+    ko = str(data.get("ko") or data.get("korean") or "").strip()
+    # Alternate schema: source/translation
+    if not ja and not ko:
+        src = str(data.get("source") or "").strip()
+        tgt = str(data.get("translation") or data.get("target") or "").strip()
+        if src or tgt:
+            # Heuristic assign by script
+            if detect_lang(src) == "ko":
+                ko, ja = src, tgt
+            else:
+                ja, ko = src, tgt
+    if not ja and not ko:
+        raise ValueError("empty ja/ko in JSON")
+    return ja, ko
+
+
+def polished_and_translation(
+    ja: str, ko: str, source_lang: str, raw_fallback: str
+) -> tuple[str, str]:
+    """Map bilingual fields → (polished_source, translation)."""
+    if source_lang == "ko":
+        polished = ko or raw_fallback
+        translation = ja
+    else:
+        polished = ja or raw_fallback
+        translation = ko
+    if not translation:
+        # Fall back to whichever side is not the polished source.
+        translation = (ko if polished == ja else ja) or ""
+    return polished, translation
+
+
+async def json_translate_pieces(
     *,
     room_id: str,
     pieces: list[str],
@@ -440,9 +495,17 @@ async def stream_translate_pieces(
     state: dict,
     should_abort,
     make_chunk_payload,
+    source_lang: str,
     user_contents: list[str] | None = None,
 ) -> None:
-    """Translate each source piece; auto-continue when max_tokens truncates output."""
+    """Translate pieces via JSON {ja, ko}; broadcast polished src + translation.
+
+    Uses non-streaming completion so punctuation/newlines are reliable, then
+    pushes full fields to clients (src-first raw already went out earlier).
+    """
+    polished_parts: list[str] = []
+    tgt_parts: list[str] = []
+
     for idx, piece in enumerate(pieces):
         if should_abort():
             return
@@ -453,43 +516,54 @@ async def stream_translate_pieces(
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content},
         ]
-        while True:
-            if should_abort():
-                return
-            stream = await client.chat.completions.create(
-                model=API_MODEL,
-                messages=messages,
-                stream=True,
-                temperature=API_TEMPERATURE,
-                max_tokens=max_tokens_for_piece(piece),
+        raw_out = ""
+        # Prefer JSON mode when the provider supports it.
+        create_kwargs = dict(
+            model=API_MODEL,
+            messages=messages,
+            stream=False,
+            temperature=API_TEMPERATURE,
+            max_tokens=max_tokens_for_piece(piece),
+        )
+        try:
+            resp = await client.chat.completions.create(
+                **create_kwargs,
+                response_format={"type": "json_object"},
             )
-            segment = ""
-            finish_reason = None
-            async for chunk in stream:
-                if should_abort():
-                    return
-                choice = chunk.choices[0]
-                if choice.finish_reason:
-                    finish_reason = choice.finish_reason
-                t = choice.delta.content
-                if not t:
-                    continue
-                segment += t
-                state["tgt"] += t
-                await broadcast(
-                    room_id,
-                    json.dumps(make_chunk_payload(t), ensure_ascii=False),
-                )
-            if finish_reason != "length" or not segment:
-                break
+        except Exception as e:
+            logger.warning("json_object mode failed, retrying plain: %s", e)
+            resp = await client.chat.completions.create(**create_kwargs)
+
+        raw_out = (resp.choices[0].message.content or "").strip()
+        try:
+            ja, ko = parse_bilingual_json(raw_out)
+            polished, translation = polished_and_translation(
+                ja, ko, source_lang, piece
+            )
+        except Exception as e:
             logger.warning(
-                "translation truncated (length), continuing | piece_len=%d seg_len=%d",
-                len(piece), len(segment),
+                "bilingual JSON parse failed (%s); raw fallback | head=%r",
+                e, raw_out[:160],
             )
-            messages.extend([
-                {"role": "assistant", "content": segment},
-                {"role": "user", "content": CONTINUE_PROMPT},
-            ])
+            # Last resort: treat entire output as translation, keep ASR source.
+            polished, translation = piece, raw_out
+
+        polished_parts.append(polished)
+        tgt_parts.append(translation)
+
+        # Progressive update for multi-piece inputs.
+        state["tgt"] = "\n".join(p for p in tgt_parts if p)
+        # Polished source for *this request's pieces* is applied by caller via return
+        # We also stash on state for intermediate broadcasts.
+        state["_polished_delta"] = "\n".join(p for p in polished_parts if p)
+
+        await broadcast(
+            room_id,
+            json.dumps(make_chunk_payload(""), ensure_ascii=False),
+        )
+
+    state["_polished_parts"] = polished_parts
+    state["_tgt_parts"] = tgt_parts
 
 async def finalize_utterance(
     ws: WebSocket,
@@ -605,19 +679,21 @@ async def handle_translate(
             {"src": "", "tgt": "", "src_lang": use_src, "tgt_lang": target},
         )
         state["_rev"] = utterance_rev.get(key, 0)
-        if state["src"]:
-            state["src"] += " " + text
+        prev_src = state["src"]
+        if prev_src:
+            state["src"] = prev_src + " " + text
         else:
-            state["src"] += text
+            state["src"] = text
         state["src_lang"] = use_src
         state["tgt_lang"] = target
-        full_src = state["src"]
-        rev = state["_rev"]
+        full_src = state["src"]  # raw ASR until JSON polish replaces the delta
 
         def should_abort() -> bool:
             return state.get("_rev") != utterance_rev.get(key, 0)
 
         def make_chunk_payload(_t: str) -> dict:
+            # Prefer polished source mid-flight when available.
+            src_out = state.get("_display_src") or state["src"]
             return {
                 "type": "t_chunk",
                 "text": _t,
@@ -625,12 +701,14 @@ async def handle_translate(
                 "uid": uid,
                 "final": final,
                 "spk": spk,
-                "src": full_src,
+                "src": src_out,
                 "src_lang": use_src,
                 "tgt_lang": target,
+                "ja": state.get("ja") or "",
+                "ko": state.get("ko") or "",
             }
 
-        # Fan out source immediately so all clients see the utterance before LLM returns.
+        # Fan out raw source immediately (before LLM) so peers see speech ASAP.
         await broadcast(room_id, json.dumps({
             "type": "t_chunk",
             "text": "",
@@ -650,7 +728,7 @@ async def handle_translate(
             )
 
         try:
-            await stream_translate_pieces(
+            await json_translate_pieces(
                 room_id=room_id,
                 pieces=pieces,
                 user_contents=user_contents,
@@ -658,6 +736,7 @@ async def handle_translate(
                 state=state,
                 should_abort=should_abort,
                 make_chunk_payload=make_chunk_payload,
+                source_lang=use_src,
             )
         except Exception as e:
             logger.error("API error: %s", e)
@@ -666,8 +745,25 @@ async def handle_translate(
             }))
             return
 
+        polished_delta = state.get("_polished_delta") or text
+        if prev_src:
+            state["src"] = (prev_src.rstrip() + "\n" + polished_delta).strip()
+        else:
+            state["src"] = polished_delta
+        state["_display_src"] = state["src"]
+        full_src = state["src"]
+
+        # Expose both languages on the wire for clients that want ja/ko fields.
+        if use_src == "ja":
+            state["ja"] = full_src
+            state["ko"] = state["tgt"]
+        else:
+            state["ko"] = full_src
+            state["ja"] = state["tgt"]
+
         remember_src(room_id, spk, text)
-        speaker_chunks.append(room_id, spk, text)
+        # Store polished text in chunk memory for better next-fragment context.
+        speaker_chunks.append(room_id, spk, polished_delta)
 
         if not final:
             if should_abort():
@@ -682,6 +778,8 @@ async def handle_translate(
                 "src": full_src,
                 "src_lang": use_src,
                 "tgt_lang": target,
+                "ja": state.get("ja") or "",
+                "ko": state.get("ko") or "",
             }, ensure_ascii=False))
 
         if final:
@@ -696,6 +794,8 @@ async def handle_translate(
                 "src": full_src,
                 "src_lang": use_src,
                 "tgt_lang": target,
+                "ja": state.get("ja") or "",
+                "ko": state.get("ko") or "",
             }, ensure_ascii=False))
 
             upsert_ctx_entry(ctx_buf, uid, spk, full_src)
@@ -757,6 +857,7 @@ async def handle_retranslate(
         full_src = text
 
         def make_chunk_payload(_t: str) -> dict:
+            src_out = state.get("_display_src") or state["src"]
             return {
                 "type": "t_chunk",
                 "text": _t,
@@ -765,20 +866,31 @@ async def handle_retranslate(
                 "final": True,
                 "revised": True,
                 "spk": spk,
-                "src": full_src,
+                "src": src_out,
                 "src_lang": use_src,
                 "tgt_lang": target,
+                "ja": state.get("ja") or "",
+                "ko": state.get("ko") or "",
             }
 
         try:
-            await stream_translate_pieces(
+            await json_translate_pieces(
                 room_id=room_id,
                 pieces=split_text(text),
                 system_content=ctx + prompt,
                 state=state,
                 should_abort=lambda: False,
                 make_chunk_payload=make_chunk_payload,
+                source_lang=use_src,
             )
+            polished = state.get("_polished_delta") or text
+            state["src"] = polished
+            state["_display_src"] = polished
+            full_src = polished
+            if use_src == "ja":
+                state["ja"], state["ko"] = full_src, state["tgt"]
+            else:
+                state["ko"], state["ja"] = full_src, state["tgt"]
         except Exception as e:
             logger.error("API error (retranslate): %s", e)
             await send_to(ws, json.dumps({
@@ -799,6 +911,8 @@ async def handle_retranslate(
             "src": full_src,
             "src_lang": use_src,
             "tgt_lang": target,
+            "ja": state.get("ja") or "",
+            "ko": state.get("ko") or "",
         }, ensure_ascii=False))
 
         updated = await db.update_message_by_uid(

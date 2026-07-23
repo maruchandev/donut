@@ -569,6 +569,7 @@ header {
   font-weight: 500;
   line-height: 1.6;
   word-break: break-word;
+  white-space: pre-wrap; /* honor AI newlines / sentence breaks */
 }
 .entry .sub {
   color: var(--text-muted);
@@ -578,6 +579,7 @@ header {
   padding-top: 6px;
   border-top: 1px solid var(--border);
   word-break: break-word;
+  white-space: pre-wrap;
 }
 .entry .main.tent { color: var(--text-muted); }
 .entry .sub.tent { color: var(--text-dim); border-top-color: transparent; padding-top: 0; margin-top: 4px; }
