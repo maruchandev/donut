@@ -20,23 +20,23 @@ let historyExhausted = false;
 let historyLoaded = false;
 let scrollTimer = null;
 
-const SPEECH_FRAME_PAUSE_MS = 2000;
-const SPEECH_MIN_SEND_CHARS = 12;
-const SPEECH_MAX_BUFFER_CHARS = 90;
-const SPEECH_FORCE_CHUNK_CHARS = 55;
-const SENTENCE_END_RE = /[。！？.!?\n]/;
-const CLAUSE_END_RE = /[、，,;；]/;
-const SOFT_BREAK_PARTICLES = [
-  'けれども', 'だけれども', 'という', 'といった', 'なので', 'ので', 'ですが',
-  'ますが', 'ました', 'です', 'ます', 'して', 'れば', 'から', 'まで', 'など',
-];
+/*
+ * Speech pipeline (final-segment / server-driven):
+ * - Web Speech interim → local preview only (never translate)
+ * - Each isFinal result → one segment, one bubble, sent once
+ * - Server broadcasts source immediately, translates async with prior-chunk context
+ * - Client + server hash dedupe prevent multi-send storms
+ */
+const SPEECH_MIN_SEND_CHARS = 2;
+const SPEECH_DEDUP_MAX = 48;
+const SPEECH_DEDUP_TTL_MS = 5 * 60 * 1000;
 
-let speechCommitted = '';
 let speechInterim = '';
-let speechSentLen = 0;
-let speechSendTimer = null;
-let speechUid = null;
-let speechFullSrc = '';
+/** result keys already emitted this recognition generation: "gen:index" */
+let speechEmittedKeys = {};
+let speechRecGen = 0;
+/** Recent sent chunks for duplicate suppression { hash, at }. */
+let speechSentHashes = [];
 
 const lobbyEl = document.getElementById('lobby');
 const chatEl = document.getElementById('chat');
@@ -875,12 +875,23 @@ function applyEntryText(e, src, tgt, isFinal) {
     e.sub.textContent = tgt || '';
     e.main.className = 'main ' + (isFinal ? 'final' : 'tent');
     e.sub.className = tgt ? ('sub ' + (isFinal ? 'final' : 'tent')) : WAITING_CLS;
+    if (!tgt && e.sub.className === WAITING_CLS) {
+      e.sub.textContent = TXT[UI].waiting + '…';
+    }
     if (useSrc) e.srcText = useSrc;
   } else {
-    e.main.textContent = tgt || '';
-    e.sub.textContent = src || '';
-    e.main.className = 'main ' + (tgt ? (isFinal ? 'final' : 'tent') : 'tent');
-    e.sub.className = 'sub final';
+    // Source may arrive before translation (server-driven src-first broadcast).
+    if (tgt) {
+      e.main.textContent = tgt;
+      e.sub.textContent = src || '';
+      e.main.className = 'main ' + (isFinal ? 'final' : 'tent');
+      e.sub.className = 'sub final';
+    } else {
+      e.main.textContent = src || '';
+      e.main.className = 'main tent';
+      e.sub.textContent = TXT[UI].waiting + '…';
+      e.sub.className = WAITING_CLS;
+    }
   }
   if (isFinal) {
     e.row.classList.remove('interim', 'revising');
@@ -893,6 +904,18 @@ function applyEntryText(e, src, tgt, isFinal) {
 function handleServerMsg(msg) {
   if (msg.type === 'error') {
     showError(msg.message || TXT[UI].errPrefix, msg.uid);
+    return;
+  }
+
+  // Server rejected a duplicate segment — drop the optimistic local bubble.
+  if (msg.type === 't_skip') {
+    var skipUid = msg.uid;
+    if (skipUid && entries[skipUid]) {
+      var skipE = entries[skipUid];
+      if (skipE.row && skipE.row.parentNode) skipE.row.remove();
+      delete entries[skipUid];
+      updateEmptyState();
+    }
     return;
   }
 
@@ -920,11 +943,23 @@ function handleServerMsg(msg) {
   if (e && e.awaitingRevision) return;
 
   if (!e) {
-    if (!msg.src) return;
+    if (!msg.src && !(msg.acc || msg.full)) return;
     var ml = myLang.value;
     var isMine = !!ownUids[uid] || msg.src_lang === ml;
-    var mainText = isMine ? msg.src : (msg.acc || msg.full || '');
-    var subText = isMine ? (msg.acc || msg.full || '') : msg.src;
+    var tgt0 = msg.acc || msg.full || '';
+    var mainText;
+    var subText;
+    if (isMine) {
+      mainText = msg.src || '';
+      subText = tgt0;
+    } else if (tgt0) {
+      mainText = tgt0;
+      subText = msg.src || '';
+    } else {
+      // Peer source arrived before translation — show source as provisional main.
+      mainText = msg.src || '';
+      subText = '';
+    }
     createEntry(uid, msg.spk || '?', mainText, subText, isFinal, isMine);
     return;
   }
@@ -973,7 +1008,7 @@ function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
   main.textContent = mainText;
 
   var sub = document.createElement('div');
-  if (!subText && isMine) {
+  if (!subText) {
     sub.className = WAITING_CLS;
     sub.textContent = TXT[UI].waiting + '…';
   } else {
@@ -1049,110 +1084,54 @@ function insertNewlineAtCursor(el) {
   el.selectionEnd = pos;
 }
 
-/* ---- recording ---- */
+/* ---- recording (final-segment / server-driven) ---- */
 
-function getSpeechFull() {
-  return speechCommitted + speechInterim;
+function normalizeSpeechText(s) {
+  return String(s || '').replace(/\s+/g, '').toLowerCase();
 }
 
-function getSpeechRemainder() {
-  return getSpeechFull().slice(speechSentLen);
-}
-
-function clearSpeechSendTimer() {
-  if (speechSendTimer) {
-    clearTimeout(speechSendTimer);
-    speechSendTimer = null;
+function pruneSpeechDedupLedger() {
+  var now = Date.now();
+  speechSentHashes = speechSentHashes.filter(function(e) {
+    return now - e.at < SPEECH_DEDUP_TTL_MS;
+  });
+  if (speechSentHashes.length > SPEECH_DEDUP_MAX) {
+    speechSentHashes = speechSentHashes.slice(-SPEECH_DEDUP_MAX);
   }
+}
+
+function rememberSpeechSent(text) {
+  var h = normalizeSpeechText(text);
+  if (!h) return;
+  pruneSpeechDedupLedger();
+  speechSentHashes.push({ hash: h, at: Date.now() });
+  if (speechSentHashes.length > SPEECH_DEDUP_MAX) {
+    speechSentHashes = speechSentHashes.slice(-SPEECH_DEDUP_MAX);
+  }
+}
+
+function isDuplicateSpeech(text) {
+  var h = normalizeSpeechText(text);
+  if (!h) return true;
+  if (h.length < SPEECH_MIN_SEND_CHARS) return true;
+  pruneSpeechDedupLedger();
+  var i;
+  for (i = 0; i < speechSentHashes.length; i++) {
+    var prev = speechSentHashes[i].hash;
+    if (prev === h) return true;
+    if (h.length >= 6 && prev.length >= 6) {
+      if (prev.indexOf(h) !== -1 && h.length / prev.length >= 0.85) return true;
+      if (h.indexOf(prev) !== -1 && prev.length / h.length >= 0.85) return true;
+    }
+  }
+  return false;
 }
 
 function resetSpeechState() {
-  speechCommitted = '';
   speechInterim = '';
-  speechSentLen = 0;
-  clearSpeechSendTimer();
-  speechUid = null;
-  speechFullSrc = '';
-}
-
-function ensureSpeechUid() {
-  if (!speechUid) {
-    speechUid = clientId + '-' + (++uttId);
-  }
-  return speechUid;
-}
-
-function finalizeSpeechStream() {
-  if (!speechUid || !ws || ws.readyState !== WebSocket.OPEN) return;
-  ownUids[speechUid] = true;
-  ws.send(JSON.stringify({
-    type: 'translate',
-    uid: speechUid,
-    text: '',
-    source_lang: 'auto',
-    target_lang: 'auto',
-    speaker_id: spk(),
-    is_final: true,
-    finalize_only: true,
-  }));
-}
-
-function closeSpeechFrame() {
-  if (!speechUid) return;
-  finalizeSpeechStream();
-  speechUid = null;
-  speechFullSrc = '';
-}
-
-function scheduleSpeechSend() {
-  clearSpeechSendTimer();
-  if (!isRecording) return;
-  var unsent = getSpeechRemainder().trim();
-  if (!unsent) return;
-  speechSendTimer = setTimeout(function() {
-    speechSendTimer = null;
-    if (!isRecording) return;
-    commitSpeechOnPause();
-    if (getSpeechRemainder().trim()) scheduleSpeechSend();
-  }, SPEECH_FRAME_PAUSE_MS);
-}
-
-function splitAtSentenceEnds(text) {
-  var complete = [];
-  var lastEnd = 0;
-  for (var i = 0; i < text.length; i++) {
-    if (SENTENCE_END_RE.test(text[i])) {
-      var sent = text.slice(lastEnd, i + 1).trim();
-      if (sent) complete.push(sent);
-      lastEnd = i + 1;
-    }
-  }
-  return {
-    complete: complete,
-    remainder: text.slice(lastEnd),
-    consumed: lastEnd,
-  };
-}
-
-function updateSpeechPreview() {
-  var remainder = getSpeechRemainder();
-  if (!remainder.trim()) {
-    clearLocalInterim();
-    return;
-  }
-  if (!localInterim) {
-    localInterim = document.createElement('div');
-    localInterim.className = 'entry mine interim';
-    var color = speakerColor(spk());
-    localInterim.innerHTML =
-      '<div class="spk" style="color:' + color + '">' +
-      '<span class="spk-dot" style="background:' + color + '"></span>' +
-      esc(spk()) + '</div><div class="main tent"></div>';
-    logEl.appendChild(localInterim);
-    updateEmptyState();
-  }
-  localInterim.querySelector('.main').textContent = remainder;
-  logEl.scrollTop = logEl.scrollHeight;
+  speechEmittedKeys = {};
+  speechRecGen = 0;
+  speechSentHashes = [];
 }
 
 function clearLocalInterim() {
@@ -1162,132 +1141,70 @@ function clearLocalInterim() {
   }
 }
 
-function sendSpeechSentence(text, opts) {
-  opts = opts || {};
-  if (!text) return;
-  var uid = ensureSpeechUid();
-  speechFullSrc += (speechFullSrc ? ' ' : '') + text;
-  var isContinuation = !!entries[uid];
-  send(text, !!opts.final, {
-    uid: uid,
-    continuation: isContinuation,
-    fullSrc: speechFullSrc,
-  });
-  updateSpeechPreview();
-}
-
-function sendCommittedSentences() {
-  var unsent = getSpeechRemainder();
-  if (!unsent.trim()) return false;
-
-  var split = splitAtSentenceEnds(unsent);
-  if (!split.complete.length) return false;
-
-  for (var i = 0; i < split.complete.length; i++) {
-    sendSpeechSentence(split.complete[i]);
-  }
-  speechSentLen += split.consumed;
-  return true;
-}
-
-function findSoftBreakEnd(slice, minAt) {
-  var i;
-  for (i = slice.length - 1; i >= minAt; i--) {
-    if (/\s/.test(slice[i])) return i + 1;
-  }
-  var best = -1;
-  var p;
-  for (p = 0; p < SOFT_BREAK_PARTICLES.length; p++) {
-    var phrase = SOFT_BREAK_PARTICLES[p];
-    var pos = slice.lastIndexOf(phrase);
-    if (pos >= minAt) {
-      var end = pos + phrase.length;
-      if (end > best) best = end;
-    }
-  }
-  return best;
-}
-
-function extractChunk(text) {
-  if (!text.trim()) return { text: '', consumed: 0 };
-
-  var limit = Math.min(text.length, SPEECH_MAX_BUFFER_CHARS);
-  var slice = text.slice(0, limit);
-  var minAt = Math.min(SPEECH_MIN_SEND_CHARS, slice.length);
-  var i;
-
-  for (i = slice.length - 1; i >= minAt; i--) {
-    if (SENTENCE_END_RE.test(slice[i])) {
-      return { text: slice.slice(0, i + 1), consumed: i + 1 };
-    }
-  }
-  for (i = slice.length - 1; i >= minAt; i--) {
-    if (CLAUSE_END_RE.test(slice[i])) {
-      return { text: slice.slice(0, i + 1), consumed: i + 1 };
-    }
-  }
-  if (text.length >= SPEECH_MAX_BUFFER_CHARS) {
-    var searchLen = Math.min(SPEECH_FORCE_CHUNK_CHARS, slice.length);
-    var softSlice = slice.slice(0, searchLen);
-    var softEnd = findSoftBreakEnd(softSlice, minAt);
-    if (softEnd > 0) {
-      return { text: slice.slice(0, softEnd), consumed: softEnd };
-    }
-    return { text: slice.slice(0, searchLen), consumed: searchLen };
-  }
-  return { text: '', consumed: 0 };
-}
-
-function sendBufferedChunks() {
-  var sent = false;
-  var unsent = getSpeechRemainder();
-  while (unsent.trim().length >= SPEECH_MAX_BUFFER_CHARS) {
-    var chunk = extractChunk(unsent);
-    if (!chunk.text.trim() || chunk.consumed <= 0) break;
-    sendSpeechSentence(chunk.text.trim());
-    speechSentLen += chunk.consumed;
-    sent = true;
-    unsent = getSpeechRemainder();
-  }
-  return sent;
-}
-
-function commitSpeechIncremental() {
-  sendCommittedSentences();
-  sendBufferedChunks();
-  updateSpeechPreview();
-}
-
-function commitSpeechOnPause() {
-  sendCommittedSentences();
-
-  var still = getSpeechRemainder().trim();
-  if (still) {
-    sendSpeechSentence(still);
-    speechSentLen = getSpeechFull().length;
-  }
-
-  closeSpeechFrame();
-  updateSpeechPreview();
-}
-
-function commitAllSpeech() {
-  clearSpeechSendTimer();
-  var unsent = getSpeechRemainder();
-  if (!unsent.trim()) {
+function updateSpeechPreview(interimText) {
+  speechInterim = interimText || '';
+  var t = speechInterim.trim();
+  if (!t) {
     clearLocalInterim();
     return;
   }
+  if (!localInterim) {
+    localInterim = document.createElement('div');
+    localInterim.className = 'entry mine interim';
+    var color = speakerColor(spk());
+    localInterim.innerHTML =
+      '<div class="entry-head">' +
+      '<div class="spk" style="color:' + color + '">' +
+      '<span class="spk-dot" style="background:' + color + '"></span>' +
+      esc(spk()) + '</div></div>' +
+      '<div class="main tent"></div>';
+    logEl.appendChild(localInterim);
+    updateEmptyState();
+  }
+  localInterim.querySelector('.main').textContent = t;
+  logEl.scrollTop = logEl.scrollHeight;
+}
 
-  sendCommittedSentences();
+/**
+ * One ASR final = one chat bubble. Server adds prior-chunk context and
+ * broadcasts source immediately before translation streams in.
+ */
+function emitFinalSegment(text) {
+  text = (text || '').trim();
+  if (text.length < SPEECH_MIN_SEND_CHARS) return false;
+  if (isDuplicateSpeech(text)) return false;
+  rememberSpeechSent(text);
+  // New uid per final segment (no client-side frame merging).
+  send(text, true);
+  return true;
+}
 
-  var tail = getSpeechRemainder().trim();
-  if (tail) sendSpeechSentence(tail);
+function processSpeechResults(results, resultIndex) {
+  var i;
+  for (i = resultIndex; i < results.length; i++) {
+    if (!results[i].isFinal) continue;
+    var key = speechRecGen + ':' + i;
+    if (speechEmittedKeys[key]) continue;
+    speechEmittedKeys[key] = true;
+    var piece = (results[i][0] && results[i][0].transcript) || '';
+    emitFinalSegment(piece);
+  }
 
-  speechCommitted = '';
+  var interim = '';
+  for (i = results.length - 1; i >= 0; i--) {
+    if (!results[i].isFinal) {
+      interim = (results[i][0] && results[i][0].transcript) || '';
+      break;
+    }
+  }
+  updateSpeechPreview(interim);
+}
+
+function flushInterimOnStop() {
+  var t = (speechInterim || '').trim();
   speechInterim = '';
-  speechSentLen = 0;
   clearLocalInterim();
+  if (t) emitFinalSegment(t);
 }
 
 function startRecording() {
@@ -1304,21 +1221,7 @@ function startRecording() {
   recognition.maxAlternatives = 1;
 
   recognition.onresult = function(event) {
-    for (var i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) {
-        speechCommitted += event.results[i][0].transcript;
-      }
-    }
-    speechInterim = '';
-    for (var j = event.results.length - 1; j >= 0; j--) {
-      if (!event.results[j].isFinal) {
-        speechInterim = event.results[j][0].transcript;
-        break;
-      }
-    }
-    updateSpeechPreview();
-    commitSpeechIncremental();
-    scheduleSpeechSend();
+    processSpeechResults(event.results, event.resultIndex);
   };
 
   recognition.onerror = function(event) {
@@ -1328,15 +1231,11 @@ function startRecording() {
   };
 
   recognition.onend = function() {
-    if (isRecording) {
-      if (speechInterim) {
-        speechCommitted += speechInterim;
-        speechInterim = '';
-        updateSpeechPreview();
-        scheduleSpeechSend();
-      }
-      try { recognition.start(); } catch(e) {}
-    }
+    if (!isRecording) return;
+    // New recognition generation: result indices reset; do NOT re-send past finals.
+    speechRecGen += 1;
+    // Keep interim preview; finals already emitted. Restart engine.
+    try { recognition.start(); } catch (e) {}
   };
 
   recognition.start();
@@ -1347,14 +1246,13 @@ function startRecording() {
 }
 
 function stopRecording() {
-  commitAllSpeech();
-  closeSpeechFrame();
+  isRecording = false;
+  flushInterimOnStop();
   resetSpeechState();
   if (recognition) {
-    try { recognition.stop(); } catch(e) {}
+    try { recognition.stop(); } catch (e) {}
     recognition = null;
   }
-  isRecording = false;
   recordBtn.textContent = TXT[UI].rec;
   recordBtn.className = 'btn-record idle';
   setStatus(TXT[UI].recOff);

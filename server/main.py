@@ -164,6 +164,60 @@ utterance_locks: dict[str, asyncio.Lock] = {}
 utterance_rev: dict[str, int] = {}
 speaker_chunks = SpeakerChunkStore()
 MAX_CTX = 6
+# Short-term source dedupe: room:spk → list of (monotonic_ts, norm_hash)
+recent_src_hashes: dict[str, list[tuple[float, str]]] = {}
+SRC_DEDUP_TTL_SECS = 300.0
+SRC_DEDUP_MAX = 48
+
+
+def normalize_src_hash(text: str) -> str:
+    return "".join((text or "").split()).lower()
+
+
+def prune_src_dedup(key: str, now: float | None = None) -> None:
+    now = time.monotonic() if now is None else now
+    buf = recent_src_hashes.get(key)
+    if not buf:
+        return
+    kept = [(t, h) for t, h in buf if now - t < SRC_DEDUP_TTL_SECS]
+    if len(kept) > SRC_DEDUP_MAX:
+        kept = kept[-SRC_DEDUP_MAX:]
+    if kept:
+        recent_src_hashes[key] = kept
+    else:
+        recent_src_hashes.pop(key, None)
+
+
+def is_duplicate_src(room_id: str, spk: str, text: str) -> bool:
+    """Return True if the same (or near-identical) source was just translated."""
+    h = normalize_src_hash(text)
+    if not h or len(h) < 2:
+        return True
+    key = f"{room_id}:{spk}"
+    now = time.monotonic()
+    prune_src_dedup(key, now)
+    for _, prev in recent_src_hashes.get(key, []):
+        if prev == h:
+            return True
+        if len(h) >= 6 and len(prev) >= 6:
+            if h in prev and len(h) / len(prev) >= 0.85:
+                return True
+            if prev in h and len(prev) / len(h) >= 0.85:
+                return True
+    return False
+
+
+def remember_src(room_id: str, spk: str, text: str) -> None:
+    h = normalize_src_hash(text)
+    if not h:
+        return
+    key = f"{room_id}:{spk}"
+    now = time.monotonic()
+    prune_src_dedup(key, now)
+    buf = recent_src_hashes.setdefault(key, [])
+    buf.append((now, h))
+    if len(buf) > SRC_DEDUP_MAX:
+        recent_src_hashes[key] = buf[-SRC_DEDUP_MAX:]
 
 
 def format_ctx(buf: list[dict]) -> str:
@@ -190,6 +244,9 @@ async def dissolve_room(room_id: str, reason: str) -> None:
     room_ctx.pop(room_id, None)
     speaker_chunks.clear_room(room_id)
     room_last_active.pop(room_id, None)
+    prefix = f"{room_id}:"
+    for key in [k for k in recent_src_hashes if k.startswith(prefix)]:
+        recent_src_hashes.pop(key, None)
     if not room:
         return
     sockets = list(room)
@@ -480,6 +537,23 @@ async def handle_translate(
     spk: str,
     final: bool,
 ) -> None:
+    text = (text or "").strip()
+    if not text:
+        return
+
+    # Server-side guard against client multi-send / ASR restarts.
+    if is_duplicate_src(room_id, spk, text):
+        logger.info(
+            "translate skip dedupe | room=%s uid=%s spk=%s len=%d",
+            room_id, uid, spk, len(text),
+        )
+        await send_to(ws, json.dumps({
+            "type": "t_skip",
+            "uid": uid,
+            "reason": "duplicate",
+        }, ensure_ascii=False))
+        return
+
     detected_src = detect_lang(text)
     use_src = detected_src if source in ("auto", "?") else source
     if target == "auto":
@@ -542,6 +616,19 @@ async def handle_translate(
                 "tgt_lang": target,
             }
 
+        # Fan out source immediately so all clients see the utterance before LLM returns.
+        await broadcast(room_id, json.dumps({
+            "type": "t_chunk",
+            "text": "",
+            "acc": state["tgt"],
+            "uid": uid,
+            "final": False,
+            "spk": spk,
+            "src": full_src,
+            "src_lang": use_src,
+            "tgt_lang": target,
+        }, ensure_ascii=False))
+
         if prev_chunks:
             logger.info(
                 "chunk ctx | room=%s spk=%s prev=%d new_len=%d",
@@ -565,6 +652,7 @@ async def handle_translate(
             }))
             return
 
+        remember_src(room_id, spk, text)
         speaker_chunks.append(room_id, spk, text)
 
         if not final:
