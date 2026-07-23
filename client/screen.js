@@ -164,17 +164,19 @@ function splitBilingual(src, tgt, srcLang) {
   return { ja: src || '', ko: tgt || '' };
 }
 
-var FIT_MIN = 15;
+var FIT_MIN = 16;
+/** Remember last fitted size so a short follow-up does not jump to max size. */
+var lastFitPx = 0;
 
 function getFitMaxPx() {
   var isFs = document.body.classList.contains('fs');
   var vh = window.innerHeight;
   var vw = window.innerWidth;
   if (isFs) {
-    return Math.min(32, Math.max(18, Math.round(vh * 0.032)));
+    return Math.min(34, Math.max(18, Math.round(vh * 0.034)));
   }
   if (vw < 768) return Math.min(28, Math.round(vw * 0.038));
-  return Math.min(36, Math.round(vw * 0.028));
+  return Math.min(38, Math.round(vw * 0.03));
 }
 
 function setWaiting() {
@@ -185,31 +187,72 @@ function setWaiting() {
   koCurrent.className = 'current-text empty';
   jaCurrent.style.fontSize = '';
   koCurrent.style.fontSize = '';
+  lastFitPx = 0;
 }
 
-function fitCurrentText(el) {
-  if (!el || el.classList.contains('empty')) {
-    if (el) el.style.fontSize = '';
+/**
+ * Pin scroll to the top of the live stage so long→short reflows never yank
+ * the eye to the bottom of a scrollable box.
+ */
+function pinStageTop(el) {
+  if (!el) return;
+  el.scrollTop = 0;
+  var stage = el.parentElement;
+  if (stage) stage.scrollTop = 0;
+}
+
+/**
+ * Fit JA and KO to the *same* font size so columns stay aligned, and prefer
+ * staying near the previous size when content shrinks (short after long).
+ */
+function fitCurrentPair() {
+  var ja = jaCurrent;
+  var ko = koCurrent;
+  if (!ja || !ko) return;
+  if (ja.classList.contains('empty') && ko.classList.contains('empty')) {
+    ja.style.fontSize = '';
+    ko.style.fontSize = '';
     return;
   }
-  var parent = el.parentElement;
-  if (!parent) return;
-  var maxH = parent.clientHeight;
-  if (maxH < 24) {
-    requestAnimationFrame(function() { fitCurrentText(el); });
+
+  var jaStage = ja.parentElement;
+  var koStage = ko.parentElement;
+  var maxH = Math.min(
+    jaStage ? jaStage.clientHeight : 0,
+    koStage ? koStage.clientHeight : 0
+  );
+  if (maxH < 32) {
+    requestAnimationFrame(fitCurrentPair);
     return;
   }
 
   var maxPx = getFitMaxPx();
-  var targetH = maxH - 12;
-  var size = maxPx;
-  el.style.fontSize = size + 'px';
-  el.style.lineHeight = '1.45';
-  while (el.scrollHeight > targetH && size > FIT_MIN) {
-    size -= 1;
-    el.style.fontSize = size + 'px';
+  var targetH = maxH - 8;
+  // Start from previous size when possible (avoids short text ballooning to max).
+  var start = lastFitPx > 0 ? Math.min(maxPx, Math.max(FIT_MIN, lastFitPx + 2)) : maxPx;
+  var size = start;
+  ja.style.lineHeight = '1.45';
+  ko.style.lineHeight = '1.45';
+
+  function applies(sz) {
+    ja.style.fontSize = sz + 'px';
+    ko.style.fontSize = sz + 'px';
+    return ja.scrollHeight <= targetH && ko.scrollHeight <= targetH;
   }
-  parent.style.overflowY = el.scrollHeight > targetH ? 'auto' : 'hidden';
+
+  if (!applies(size)) {
+    while (size > FIT_MIN && !applies(size)) size -= 1;
+    applies(size);
+  } else {
+    // Content got shorter: allow gentle grow toward max, but not a full jump.
+    var growCap = Math.min(maxPx, size + 6);
+    while (size < growCap && applies(size + 1)) size += 1;
+    applies(size);
+  }
+
+  lastFitPx = size;
+  pinStageTop(ja);
+  pinStageTop(ko);
 }
 
 function renderCurrent() {
@@ -222,9 +265,13 @@ function renderCurrent() {
   koCurrent.textContent = current.ko || '…';
   jaCurrent.className = cls;
   koCurrent.className = cls;
+  // Always reset scroll before measuring / painting short follow-ups.
+  pinStageTop(jaCurrent);
+  pinStageTop(koCurrent);
   requestAnimationFrame(function() {
-    fitCurrentText(jaCurrent);
-    fitCurrentText(koCurrent);
+    fitCurrentPair();
+    pinStageTop(jaCurrent);
+    pinStageTop(koCurrent);
   });
 }
 
@@ -476,7 +523,13 @@ function joinRoom(val) {
 }
 
 function refitCurrentText() {
-  if (current.ja || current.ko) renderCurrent();
+  if (current.ja || current.ko) {
+    requestAnimationFrame(function() {
+      fitCurrentPair();
+      pinStageTop(jaCurrent);
+      pinStageTop(koCurrent);
+    });
+  }
 }
 
 function updateFsBtn() {

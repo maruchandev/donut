@@ -9,7 +9,7 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <title>どーなつ — 大画面表示</title>
 <link rel="stylesheet" href="theme.css?v=6">
-<link rel="stylesheet" href="screen.css?v=9">
+<link rel="stylesheet" href="screen.css?v=10">
 </head>
 <body>
 
@@ -50,24 +50,25 @@
         <span class="col-label-code">JP</span>
         <span id="jaLabel">日本語</span>
       </div>
-      <div class="current">
+      <!-- Previous stays above so the live stage does not jump downward. -->
+      <div class="history-wrap" id="jaHistory" aria-label="previous"></div>
+      <div class="current" id="jaStage">
         <div class="current-text empty" id="jaCurrent">翻訳を待っています…</div>
       </div>
-      <div class="history-wrap" id="jaHistory"></div>
     </section>
     <section class="col col-ko">
       <div class="col-label">
         <span class="col-label-code">KR</span>
         <span id="koLabel">한국어</span>
       </div>
-      <div class="current">
+      <div class="history-wrap" id="koHistory" aria-label="previous"></div>
+      <div class="current" id="koStage">
         <div class="current-text empty" id="koCurrent">번역을 기다리는 중…</div>
       </div>
-      <div class="history-wrap" id="koHistory"></div>
     </section>
   </div>
 </div>
 
-<script src="screen.js"></script>
+<script src="screen.js?v=10"></script>
 </body>
 </html>
