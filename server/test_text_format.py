@@ -1,6 +1,6 @@
 import unittest
 
-from text_format import ensure_sentence_newlines, format_display_text, soft_clause_breaks
+from text_format import ensure_sentence_newlines, format_display_text
 
 
 class TextFormatTests(unittest.TestCase):
@@ -17,18 +17,20 @@ class TextFormatTests(unittest.TestCase):
         self.assertIn("\n", s)
         self.assertNotIn("\\n", s)
 
-    def test_ja_clause_soft(self):
-        s = soft_clause_breaks("今日はいい天気です明日も晴れます", "ja")
-        self.assertIn("\n", s)
-        self.assertIn("です。", s)
+    def test_does_not_split_desuka(self):
+        s = format_display_text("これは本ですか続きです。", "ja")
+        self.assertNotIn("です。\nか", s)
+        self.assertIn("ですか", s)
+        self.assertEqual(s, "これは本ですか続きです。")
+
+    def test_does_not_split_bare_desu(self):
+        # No 。 → no forced break (AI must supply real sentence ends)
+        s = format_display_text("今日はいい天気です明日も晴れます", "ja")
+        self.assertEqual(s, "今日はいい天気です明日も晴れます")
 
     def test_idempotent(self):
         s = "こんにちは。\n今日はいい天気です。"
         self.assertEqual(ensure_sentence_newlines(s), s)
-
-    def test_format_display(self):
-        s = format_display_text("テストです続きがあります", "ja")
-        self.assertIn("\n", s)
 
 
 if __name__ == "__main__":
