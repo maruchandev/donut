@@ -34,6 +34,7 @@ import aiosqlite
 
 import auth
 import db
+from chunk_context import SpeakerChunkStore, build_chunk_user_content
 from chunking import max_tokens_for_piece, split_text
 
 load_dotenv()
@@ -161,6 +162,7 @@ room_last_active: dict[str, float] = {}
 utterance_state: dict[str, dict] = {}
 utterance_locks: dict[str, asyncio.Lock] = {}
 utterance_rev: dict[str, int] = {}
+speaker_chunks = SpeakerChunkStore()
 MAX_CTX = 6
 
 
@@ -186,6 +188,7 @@ def touch_room(room_id: str) -> None:
 async def dissolve_room(room_id: str, reason: str) -> None:
     room = rooms.pop(room_id, None)
     room_ctx.pop(room_id, None)
+    speaker_chunks.clear_room(room_id)
     room_last_active.pop(room_id, None)
     if not room:
         return
@@ -366,14 +369,18 @@ async def stream_translate_pieces(
     state: dict,
     should_abort,
     make_chunk_payload,
+    user_contents: list[str] | None = None,
 ) -> None:
     """Translate each source piece; auto-continue when max_tokens truncates output."""
-    for piece in pieces:
+    for idx, piece in enumerate(pieces):
         if should_abort():
             return
+        user_content = (
+            user_contents[idx] if user_contents and idx < len(user_contents) else piece
+        )
         messages = [
             {"role": "system", "content": system_content},
-            {"role": "user", "content": piece},
+            {"role": "user", "content": user_content},
         ]
         while True:
             if should_abort():
@@ -413,6 +420,56 @@ async def stream_translate_pieces(
                 {"role": "user", "content": CONTINUE_PROMPT},
             ])
 
+async def finalize_utterance(
+    ws: WebSocket,
+    room_id: str,
+    uid: str,
+    spk: str,
+    target: str,
+) -> None:
+    """Close a streaming utterance without translating (client sent finalize_only)."""
+    key = utterance_key(room_id, uid)
+    lock = utterance_locks.setdefault(key, asyncio.Lock())
+
+    async with lock:
+        state = utterance_state.get(key)
+        if not state:
+            return
+
+        full_src = state["src"]
+        use_src = state["src_lang"]
+        tgt_lang = state["tgt_lang"]
+
+        await broadcast(room_id, json.dumps({
+            "type": "t_done",
+            "full": state["tgt"],
+            "uid": uid,
+            "final": True,
+            "spk": spk,
+            "src": full_src,
+            "src_lang": use_src,
+            "tgt_lang": tgt_lang,
+        }, ensure_ascii=False))
+
+        ctx_buf = room_ctx.get(room_id, [])
+        upsert_ctx_entry(ctx_buf, uid, spk, full_src)
+
+        updated = await db.update_message_by_uid(
+            room_id, uid, full_src, state["tgt"], use_src, tgt_lang,
+        )
+        if not updated:
+            await db.insert_message(
+                room_id, uid, spk, full_src, state["tgt"],
+                use_src, tgt_lang, True,
+            )
+        utterance_state.pop(key, None)
+        utterance_locks.pop(key, None)
+        logger.info(
+            "translate finalized | room=%s uid=%s src_len=%d tgt_len=%d",
+            room_id, uid, len(full_src), len(state["tgt"]),
+        )
+
+
 async def handle_translate(
     ws: WebSocket,
     room_id: str,
@@ -442,6 +499,14 @@ async def handle_translate(
 
     ctx_buf = room_ctx.get(room_id, [])
     ctx = format_ctx(ctx_buf)
+    prev_chunks = speaker_chunks.get_prev(room_id, spk)
+    pieces = split_text(text)
+    user_contents: list[str] = []
+    for i, piece in enumerate(pieces):
+        if i == 0 and prev_chunks:
+            user_contents.append(build_chunk_user_content(prev_chunks, piece))
+        else:
+            user_contents.append(piece)
 
     key = utterance_key(room_id, uid)
     lock = utterance_locks.setdefault(key, asyncio.Lock())
@@ -452,7 +517,10 @@ async def handle_translate(
             {"src": "", "tgt": "", "src_lang": use_src, "tgt_lang": target},
         )
         state["_rev"] = utterance_rev.get(key, 0)
-        state["src"] += text
+        if state["src"]:
+            state["src"] += " " + text
+        else:
+            state["src"] += text
         state["src_lang"] = use_src
         state["tgt_lang"] = target
         full_src = state["src"]
@@ -474,10 +542,17 @@ async def handle_translate(
                 "tgt_lang": target,
             }
 
+        if prev_chunks:
+            logger.info(
+                "chunk ctx | room=%s spk=%s prev=%d new_len=%d",
+                room_id, spk, len(prev_chunks), len(text),
+            )
+
         try:
             await stream_translate_pieces(
                 room_id=room_id,
-                pieces=split_text(text),
+                pieces=pieces,
+                user_contents=user_contents,
                 system_content=ctx + prompt,
                 state=state,
                 should_abort=should_abort,
@@ -489,6 +564,23 @@ async def handle_translate(
                 "type": "error", "message": str(e), "uid": uid,
             }))
             return
+
+        speaker_chunks.append(room_id, spk, text)
+
+        if not final:
+            if should_abort():
+                return
+            await broadcast(room_id, json.dumps({
+                "type": "t_chunk",
+                "text": "",
+                "acc": state["tgt"],
+                "uid": uid,
+                "final": False,
+                "spk": spk,
+                "src": full_src,
+                "src_lang": use_src,
+                "tgt_lang": target,
+            }, ensure_ascii=False))
 
         if final:
             if should_abort():
@@ -897,12 +989,17 @@ async def ws_endpoint(ws: WebSocket, room_id: str):
             if msg_type not in ("translate", "retranslate"):
                 continue
 
-            text = msg["text"]
+            text = msg.get("text", "")
             target = msg["target_lang"]
             source = msg.get("source_lang", "?")
             uid = msg.get("uid", 0)
             spk = msg.get("speaker_id") or room_names.get(ws, "unknown")
             final = msg.get("is_final", True)
+            finalize_only = msg.get("finalize_only", False)
+
+            if finalize_only:
+                await finalize_utterance(ws, room_id, uid, spk, target)
+                continue
 
             if not text or not target:
                 await send_to(ws, json.dumps({
