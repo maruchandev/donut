@@ -459,6 +459,7 @@ header {
   display: flex;
   flex-direction: column;
   background: var(--bg-subtle);
+  position: relative;
 }
 .log {
   flex: 1;
@@ -467,7 +468,63 @@ header {
   padding: 16px 20px 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+
+/* Jump to latest — semi-transparent, center-bottom of the log panel */
+.jump-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 6;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  transition: opacity 0.18s ease, transform 0.18s ease, background 0.15s;
+}
+.jump-bottom.is-visible {
+  display: inline-flex;
+  opacity: 0.78;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.jump-bottom:hover,
+.jump-bottom:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  outline: none;
+}
+.jump-bottom:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.jump-bottom-icon {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  /* Fallback if color-mix unsupported */
+}
+@supports not (background: color-mix(in srgb, white 50%, transparent)) {
+  .jump-bottom {
+    background: var(--surface);
+    opacity: 0.72;
+  }
+  .jump-bottom.is-visible { opacity: 0.78; }
+  .jump-bottom:hover,
+  .jump-bottom:focus-visible { opacity: 0.95; }
 }
 .log::-webkit-scrollbar { width: 5px; }
 .log::-webkit-scrollbar-track { background: transparent; }
@@ -525,7 +582,32 @@ header {
 .entry.mine {
   border-left-color: var(--accent);
 }
-.entry.interim { opacity: 0.75; border-left-style: dashed; }
+/* Same speaker keep talking: one name, tight follow-up (meeting log). */
+.entry.continue {
+  margin-top: -6px;
+  padding-top: 8px;
+  border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  animation: none;
+}
+.entry.continue .entry-head {
+  min-height: 0;
+  margin-bottom: 4px;
+}
+.entry.continue .spk {
+  display: none;
+}
+.entry.continue .btn-edit {
+  margin-left: auto;
+}
+.entry.interim {
+  opacity: 0.75;
+  border-left-style: dashed;
+}
+.entry.interim.continue .spk {
+  display: none;
+}
 .entry.error {
   border-left-color: var(--error);
   background: var(--record-soft);
@@ -887,6 +969,14 @@ header {
     padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
   }
   .log { padding: 12px 14px; }
+  .jump-bottom {
+    bottom: 12px;
+    min-width: 48px;
+    min-height: 48px;
+  }
+  .jump-bottom.is-visible {
+    opacity: 0.82;
+  }
   .input-hint { display: none; }
   .landing { padding: 0 16px 40px; }
   .room-code { gap: 6px; }

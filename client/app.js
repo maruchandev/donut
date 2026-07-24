@@ -3,6 +3,8 @@ var WS_URL = '';
 const MAX_ENTRIES = 200;
 const HISTORY_PAGE = 25;
 const WAITING_CLS = 'sub waiting';
+/** Same speaker within this window → compact continuation (hide repeated name). */
+const CONTINUE_GAP_MS = 90 * 1000;
 
 let ws = null;
 let recognition = null;
@@ -42,6 +44,9 @@ let speechRecGen = 0;
 let speechSentHashes = [];
 /** Cumulative normalized text already sent this recording (for delta sends). */
 let speechSentCumulativeNorm = '';
+/** Delay clearing empty interim so final→next-interim gaps do not blank the UI. */
+let interimClearTimer = null;
+const INTERIM_CLEAR_HOLD_MS = 450;
 
 const lobbyEl = document.getElementById('lobby');
 const chatEl = document.getElementById('chat');
@@ -83,7 +88,14 @@ const logEl = document.getElementById('log');
 const historyTopEl = document.getElementById('historyTop');
 const emptyState = document.getElementById('emptyState');
 const emptyText = document.getElementById('emptyText');
+const jumpBottomBtn = document.getElementById('jumpBottomBtn');
 const statusMsg = document.getElementById('statusMsg');
+/** When true, new messages keep the viewport pinned to the latest entry. */
+let stickToBottom = true;
+/** Ignore scroll events caused by our own pin-to-bottom writes. */
+let programmaticScroll = false;
+let scrollPinRaf = 0;
+const SCROLL_BOTTOM_PX = 120;
 const connDot = document.getElementById('connDot');
 const connLabel = document.getElementById('connLabel');
 const myLang = document.getElementById('myLang');
@@ -152,6 +164,7 @@ var TXT = {
     editHint: '認識された文章を直して、再翻訳します',
     editCancel: 'キャンセル',
     editSave: '再翻訳して送信',
+    jumpBottom: '最新のメッセージへ',
   },
   ko: {
     lang: '내 언어', nick: '닉네임', ph: '이름',
@@ -201,6 +214,7 @@ var TXT = {
     editHint: '인식된 문장을 고친 뒤 다시 번역합니다',
     editCancel: '취소',
     editSave: '재번역 후 전송',
+    jumpBottom: '최신 메시지로',
   },
   en: {
     lang: 'My language', nick: 'Nickname', ph: 'name',
@@ -250,6 +264,7 @@ var TXT = {
     editHint: 'Correct the recognized text, then re-translate',
     editCancel: 'Cancel',
     editSave: 'Re-translate',
+    jumpBottom: 'Jump to latest',
   },
 };
 
@@ -312,6 +327,10 @@ function applyUI() {
   emptyText.textContent = t.empty;
   sendBtn.textContent = t.send;
   recordBtn.textContent = t.rec;
+  if (jumpBottomBtn) {
+    jumpBottomBtn.setAttribute('aria-label', t.jumpBottom);
+    jumpBottomBtn.title = t.jumpBottom;
+  }
   lobbySub.textContent = t.lobbySub;
   joinBtn.textContent = t.join;
   newRoomBtn.textContent = t.newRoom;
@@ -527,6 +546,76 @@ function speakerColor(name) {
 function updateEmptyState() {
   var hasEntries = logEl.querySelector('.entry');
   emptyState.classList.toggle('hidden', !!hasEntries);
+  updateJumpBottomBtn();
+}
+
+/** True when the user is (nearly) at the bottom of the transcript. */
+function isLogNearBottom() {
+  var dist = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight;
+  return dist <= SCROLL_BOTTOM_PX;
+}
+
+function _pinLogBottomNow() {
+  // Assign twice: some mobile browsers need a reflow between writes.
+  logEl.scrollTop = logEl.scrollHeight;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/**
+ * Scroll to latest when stickToBottom, or when force=true
+ * (jump button / own send / initial load).
+ * Re-pins after layout so multi-line translation does not land off-screen.
+ */
+function scrollLogToBottom(force) {
+  if (!(force || stickToBottom)) {
+    updateJumpBottomBtn();
+    return;
+  }
+  stickToBottom = true;
+  programmaticScroll = true;
+  _pinLogBottomNow();
+
+  if (scrollPinRaf) cancelAnimationFrame(scrollPinRaf);
+  scrollPinRaf = requestAnimationFrame(function() {
+    _pinLogBottomNow();
+    scrollPinRaf = requestAnimationFrame(function() {
+      scrollPinRaf = 0;
+      _pinLogBottomNow();
+      // Release the flag after the browser has applied scroll.
+      requestAnimationFrame(function() {
+        programmaticScroll = false;
+        // If growth happened mid-frame, stick still means "stay at end".
+        if (stickToBottom) _pinLogBottomNow();
+        updateJumpBottomBtn();
+      });
+    });
+  });
+}
+
+function updateJumpBottomBtn() {
+  if (!jumpBottomBtn) return;
+  var canScroll = logEl.scrollHeight > logEl.clientHeight + 24;
+  var show = canScroll && !isLogNearBottom();
+  jumpBottomBtn.hidden = !show;
+  jumpBottomBtn.classList.toggle('is-visible', show);
+  jumpBottomBtn.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+
+/**
+ * When pinned, any DOM growth (translation text, line wrap) must re-pin.
+ * Without this, results often render just below the fold on mobile.
+ */
+function setupLogPinObserver() {
+  if (!logEl || typeof MutationObserver === 'undefined') return;
+  var mo = new MutationObserver(function() {
+    if (stickToBottom) scrollLogToBottom(false);
+    else updateJumpBottomBtn();
+  });
+  mo.observe(logEl, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
 }
 
 function trimEntries() {
@@ -542,6 +631,31 @@ function trimEntries() {
       entries[uid].row.remove();
     }
     delete entries[uid];
+  }
+  refreshContinuationClasses();
+}
+
+/**
+ * Consecutive bubbles from the same speaker (mine/other) within CONTINUE_GAP_MS
+ * get .continue — name hidden, tighter spacing (meeting-log style).
+ */
+function refreshContinuationClasses() {
+  var nodes = logEl.querySelectorAll('.entry:not(.interim)');
+  var prev = null;
+  for (var i = 0; i < nodes.length; i++) {
+    var row = nodes[i];
+    var cont = false;
+    if (prev && !row.classList.contains('error') && !prev.classList.contains('error')) {
+      var sameSpk = (prev.dataset.spk || '') === (row.dataset.spk || '');
+      var sameSide =
+        prev.classList.contains('mine') === row.classList.contains('mine');
+      var gap = Math.abs(
+        (parseInt(row.dataset.ts, 10) || 0) - (parseInt(prev.dataset.ts, 10) || 0)
+      );
+      cont = sameSpk && sameSide && gap <= CONTINUE_GAP_MS;
+    }
+    row.classList.toggle('continue', cont);
+    prev = row;
   }
 }
 
@@ -577,11 +691,14 @@ function loadHistory(beforeId, isInitial) {
       oldestMsgId = msgs[0].id;
       if (isInitial) {
         msgs.forEach(function(m) { renderHistoryMessage(m, false); });
-        logEl.scrollTop = logEl.scrollHeight;
+        stickToBottom = true;
+        scrollLogToBottom(true);
       } else {
         var prevHeight = logEl.scrollHeight;
         msgs.forEach(function(m) { renderHistoryMessage(m, true); });
+        // Keep reading position when loading older messages above.
         logEl.scrollTop = logEl.scrollHeight - prevHeight;
+        updateJumpBottomBtn();
       }
     }
     if (!data.has_more) historyExhausted = true;
@@ -904,6 +1021,8 @@ function applyEntryText(e, src, tgt, isFinal) {
     e.row.dataset.final = 'true';
     if (isMine) showEditButton(e);
   }
+  // Translation updates grow content — stay pinned only if user is at bottom.
+  scrollLogToBottom(false);
 }
 
 function handleServerMsg(msg) {
@@ -919,6 +1038,7 @@ function handleServerMsg(msg) {
       var skipE = entries[skipUid];
       if (skipE.row && skipE.row.parentNode) skipE.row.remove();
       delete entries[skipUid];
+      refreshContinuationClasses();
       updateEmptyState();
     }
     return;
@@ -989,12 +1109,14 @@ function handleServerMsg(msg) {
 
 function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
   opts = opts || {};
+  var name = spkLabel || '?';
   var row = document.createElement('div');
   row.className = 'entry ' + (isMine ? 'mine' : 'other');
   row.dataset.uid = uid;
-  row.dataset.ts = opts.ts || Date.now();
+  row.dataset.ts = String(opts.ts || Date.now());
+  row.dataset.spk = name;
 
-  var color = speakerColor(spkLabel);
+  var color = speakerColor(name);
   var spkSpan = document.createElement('div');
   spkSpan.className = 'spk';
   spkSpan.style.color = color;
@@ -1002,7 +1124,8 @@ function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
   dot.className = 'spk-dot';
   dot.style.background = color;
   spkSpan.appendChild(dot);
-  spkSpan.appendChild(document.createTextNode(esc(spkLabel)));
+  // textContent path — do not HTML-escape (would show &amp; literally).
+  spkSpan.appendChild(document.createTextNode(name));
 
   var head = document.createElement('div');
   head.className = 'entry-head';
@@ -1039,14 +1162,17 @@ function createEntry(uid, spkLabel, mainText, subText, isFinal, isMine, opts) {
     else logEl.appendChild(row);
   } else {
     logEl.appendChild(row);
-    if (!opts.noScroll) logEl.scrollTop = logEl.scrollHeight;
+    // Own messages force pin; others follow stickToBottom.
+    if (!opts.noScroll) scrollLogToBottom(!!isMine);
+    else updateJumpBottomBtn();
   }
 
   entries[uid] = {
     row: row, head: head, main: main, sub: sub, editBtn: editBtn,
-    isMine: !!isMine, srcText: mainText,
+    isMine: !!isMine, srcText: mainText, spk: name,
   };
   if (isMine && isFinal) showEditButton(entries[uid]);
+  refreshContinuationClasses();
   updateEmptyState();
   trimEntries();
 }
@@ -1066,7 +1192,7 @@ function showError(message, uid) {
   row.className = 'entry error';
   row.textContent = TXT[UI].errPrefix + ': ' + message;
   logEl.appendChild(row);
-  logEl.scrollTop = logEl.scrollHeight;
+  scrollLogToBottom(false);
   updateEmptyState();
 }
 
@@ -1168,37 +1294,150 @@ function resetSpeechState() {
   speechRecGen = 0;
   speechSentHashes = [];
   speechSentCumulativeNorm = '';
+  if (interimClearTimer) {
+    clearTimeout(interimClearTimer);
+    interimClearTimer = null;
+  }
 }
 
 function clearLocalInterim() {
+  if (interimClearTimer) {
+    clearTimeout(interimClearTimer);
+    interimClearTimer = null;
+  }
   if (localInterim) {
     localInterim.remove();
     localInterim = null;
   }
 }
 
+/**
+ * Turn the live interim bubble into the permanent entry for *uid* so text never
+ * disappears between "listening" and "sent" states.
+ */
+function promoteLocalInterim(uid, fullSrc, isFinal) {
+  if (!localInterim) return false;
+  if (interimClearTimer) {
+    clearTimeout(interimClearTimer);
+    interimClearTimer = null;
+  }
+
+  var row = localInterim;
+  localInterim = null;
+  speechInterim = '';
+
+  var name = spk();
+  row.classList.remove('interim');
+  row.classList.add('mine');
+  if (isFinal) row.classList.add('is-final');
+  row.dataset.uid = uid;
+  row.dataset.ts = String(Date.now());
+  row.dataset.spk = name;
+
+  var main = row.querySelector('.main');
+  if (!main) {
+    main = document.createElement('div');
+    row.appendChild(main);
+  }
+  // Prefer longer visible text (interim often still holds the full phrase).
+  var shown = (main.textContent || '').trim();
+  var useSrc = fullSrc || shown;
+  if (shown && normalizeSpeechText(shown).indexOf(normalizeSpeechText(useSrc)) === 0 &&
+      shown.length > useSrc.length) {
+    // Interim was longer; keep it until server polish arrives.
+    useSrc = shown;
+  }
+  main.className = 'main ' + (isFinal ? 'tent' : 'tent');
+  main.textContent = useSrc;
+
+  var sub = row.querySelector('.sub');
+  if (!sub) {
+    sub = document.createElement('div');
+    row.appendChild(sub);
+  }
+  sub.className = WAITING_CLS;
+  sub.textContent = TXT[UI].waiting + '…';
+
+  var head = row.querySelector('.entry-head');
+  var editBtn = null;
+  if (head) {
+    editBtn = head.querySelector('.btn-edit');
+    if (!editBtn) {
+      editBtn = createEditButton(uid);
+      editBtn.hidden = true;
+      head.appendChild(editBtn);
+    }
+  }
+
+  ownUids[uid] = true;
+  entries[uid] = {
+    row: row,
+    head: head,
+    main: main,
+    sub: sub,
+    editBtn: editBtn,
+    isMine: true,
+    srcText: useSrc,
+    spk: name,
+  };
+  refreshContinuationClasses();
+  updateEmptyState();
+  scrollLogToBottom(true);
+  return true;
+}
+
+function ensureLocalInterimBubble() {
+  if (localInterim) return localInterim;
+  localInterim = document.createElement('div');
+  localInterim.className = 'entry mine interim';
+  localInterim.dataset.spk = spk();
+  var color = speakerColor(spk());
+  localInterim.innerHTML =
+    '<div class="entry-head">' +
+    '<div class="spk" style="color:' + color + '">' +
+    '<span class="spk-dot" style="background:' + color + '"></span>' +
+    esc(spk()) + '</div></div>' +
+    '<div class="main tent"></div>';
+  logEl.appendChild(localInterim);
+  var prevs = logEl.querySelectorAll('.entry:not(.interim)');
+  var last = prevs.length ? prevs[prevs.length - 1] : null;
+  if (
+    last &&
+    last.dataset.spk === spk() &&
+    last.classList.contains('mine') &&
+    Date.now() - (parseInt(last.dataset.ts, 10) || 0) <= CONTINUE_GAP_MS
+  ) {
+    localInterim.classList.add('continue');
+  }
+  updateEmptyState();
+  return localInterim;
+}
+
 function updateSpeechPreview(interimText) {
+  if (interimClearTimer) {
+    clearTimeout(interimClearTimer);
+    interimClearTimer = null;
+  }
   speechInterim = interimText || '';
   var t = speechInterim.trim();
   if (!t) {
+    // Web Speech often reports empty interim for a beat right when a result
+    // becomes final. Holding the last frame avoids "text vanishes then returns".
+    if (isRecording && localInterim) {
+      interimClearTimer = setTimeout(function() {
+        interimClearTimer = null;
+        if (isRecording && !(speechInterim || '').trim()) {
+          clearLocalInterim();
+        }
+      }, INTERIM_CLEAR_HOLD_MS);
+      return;
+    }
     clearLocalInterim();
     return;
   }
-  if (!localInterim) {
-    localInterim = document.createElement('div');
-    localInterim.className = 'entry mine interim';
-    var color = speakerColor(spk());
-    localInterim.innerHTML =
-      '<div class="entry-head">' +
-      '<div class="spk" style="color:' + color + '">' +
-      '<span class="spk-dot" style="background:' + color + '"></span>' +
-      esc(spk()) + '</div></div>' +
-      '<div class="main tent"></div>';
-    logEl.appendChild(localInterim);
-    updateEmptyState();
-  }
+  ensureLocalInterimBubble();
   localInterim.querySelector('.main').textContent = t;
-  logEl.scrollTop = logEl.scrollHeight;
+  scrollLogToBottom(false);
 }
 
 /**
@@ -1212,7 +1451,8 @@ function emitSpeechDelta(text) {
   if (isDuplicateSpeech(delta)) return false;
   rememberSpeechSent(delta);
   speechSentCumulativeNorm += normalizeSpeechText(delta);
-  send(delta, true);
+  // Prefer promoting the interim bubble so the phrase never blanks.
+  send(delta, true, { promoteInterim: true });
   return true;
 }
 
@@ -1239,9 +1479,19 @@ function processSpeechResults(results, resultIndex) {
 
 function flushInterimOnStop() {
   var t = (speechInterim || '').trim();
+  if (!t && localInterim) {
+    t = (localInterim.querySelector('.main') &&
+      localInterim.querySelector('.main').textContent || '').trim();
+  }
   speechInterim = '';
-  clearLocalInterim();
-  if (t) emitSpeechDelta(t);
+  if (t) {
+    emitSpeechDelta(t);
+  } else {
+    clearLocalInterim();
+  }
+  // If emit promoted the bubble, localInterim is already null.
+  // If emit failed (too short), clear leftover preview.
+  if (localInterim) clearLocalInterim();
 }
 
 function startRecording() {
@@ -1305,9 +1555,14 @@ function send(text, isFinal, opts) {
   ownUids[uid] = true;
   var isContinuation = !!opts.continuation;
   var fullSrc = opts.fullSrc || text;
+  var promote = !!opts.promoteInterim;
 
   if (!isContinuation || !entries[uid]) {
-    createEntry(uid, spk(), fullSrc, '', isFinal, true);
+    if (promote && localInterim && promoteLocalInterim(uid, fullSrc, isFinal)) {
+      // Same DOM node kept — no disappear/reappear.
+    } else {
+      createEntry(uid, spk(), fullSrc, '', isFinal, true);
+    }
   } else {
     entries[uid].main.textContent = fullSrc;
     entries[uid].srcText = fullSrc;
@@ -1316,9 +1571,9 @@ function send(text, isFinal, opts) {
       entries[uid].sub.className = WAITING_CLS;
     }
   }
-  if (entries[uid]) {
-    logEl.scrollTop = logEl.scrollHeight;
-  }
+  // Own send pins to bottom so you always see what you just said.
+  stickToBottom = true;
+  scrollLogToBottom(true);
 
   ws.send(JSON.stringify({
     type: 'translate',
@@ -1551,7 +1806,13 @@ textInput.addEventListener('keydown', function(e) {
 function setStatus(s) { statusMsg.textContent = s; }
 
 setupRoomCodeInputs();
+
 logEl.addEventListener('scroll', function() {
+  // Do not treat our pin-to-bottom writes as "user scrolled away".
+  if (!programmaticScroll) {
+    stickToBottom = isLogNearBottom();
+  }
+  updateJumpBottomBtn();
   if (scrollTimer) clearTimeout(scrollTimer);
   scrollTimer = setTimeout(function() {
     scrollTimer = null;
@@ -1559,6 +1820,19 @@ logEl.addEventListener('scroll', function() {
       loadHistory(oldestMsgId, false);
     }
   }, 120);
+});
+
+if (jumpBottomBtn) {
+  jumpBottomBtn.addEventListener('click', function() {
+    stickToBottom = true;
+    scrollLogToBottom(true);
+  });
+}
+
+setupLogPinObserver();
+window.addEventListener('resize', function() {
+  if (stickToBottom) scrollLogToBottom(false);
+  else updateJumpBottomBtn();
 });
 
 applyUI();
